@@ -292,6 +292,147 @@ export const EFFECTS: EffectDef[] = [
     `,
   },
   {
+    id: 'marbleagate',
+    name: 'Marble / Agate',
+    kind: 'generate',
+    params: [
+      c('base', 'Base', '#111018'),
+      c('veinA', 'Vein A', '#f2efe5'),
+      c('veinB', 'Vein B', '#54d3c2'),
+      c('accent', 'Accent', '#d66bff'),
+      f('scale', 'Scale', 0.5, 18, 0.1, 5.2),
+      f('rings', 'Rings', 0, 16, 0.1, 5.5),
+      f('warp', 'Warp', 0, 3, 0.01, 1.25),
+      f('turbulence', 'Turbulence', 0, 2, 0.01, 0.75),
+      f('sharpness', 'Sharpness', 0.2, 8, 0.1, 2.6),
+      f('contrast', 'Contrast', 0.5, 4, 0.01, 1.4),
+      f('angle', 'Angle', 0, 6.28, 0.01, 0.45),
+      f('speed', 'Speed', -2, 2, 0.01, 0.22),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      vec2 p = uv - vec2(0.5 * asp2, 0.5);
+      mat2 R = mat2(cos(angle), -sin(angle), sin(angle), cos(angle));
+      vec2 q = R * p * scale;
+
+      float flow = t * speed;
+      float n1 = fbm(q * 0.9 + vec2(flow, -flow * 0.35));
+      float n2 = fbm(q * 2.1 + vec2(-flow * 0.6, flow * 0.4) + n1 * 4.0);
+      q += warp * vec2(n1 - 0.5, n2 - 0.5);
+
+      float radial = length(p * vec2(1.0 / max(asp2, 0.001), 1.0));
+      float strata = q.x + n1 * turbulence * 3.0 + radial * rings;
+      float bands = 0.5 + 0.5 * sin(strata * 6.28318);
+      bands = pow(clamp(bands, 0.0, 1.0), sharpness);
+
+      float fine = fbm(q * 4.0 + n2 * 2.0 + flow);
+      float vein = smoothstep(0.5, 0.98, bands * (0.55 + fine));
+      float lace = smoothstep(0.68, 0.72, abs(fract(strata + fine * 0.35) - 0.5));
+      float depth = pow(clamp(mix(bands, fine, 0.35), 0.0, 1.0), contrast);
+
+      vec3 stone = mix(base, veinB, depth * 0.75);
+      stone = mix(stone, veinA, vein);
+      stone = mix(stone, accent, lace * (0.25 + 0.75 * fine));
+      col = clamp(stone, 0.0, 1.0);
+    `,
+  },
+  {
+    id: 'topomap',
+    name: 'Topographic Map',
+    kind: 'generate',
+    params: [
+      c('low', 'Lowland', '#102d2a'),
+      c('high', 'Highland', '#e5d7a3'),
+      c('lineCol', 'Contour', '#f8f3dc'),
+      c('water', 'Water', '#153d72'),
+      f('scale', 'Scale', 0.5, 18, 0.1, 5),
+      f('contours', 'Contours', 3, 40, 1, 16),
+      f('lineWidth', 'Line Width', 0.005, 0.2, 0.005, 0.045),
+      f('terrace', 'Terrace', 0, 1, 0.01, 0.35),
+      f('roughness', 'Roughness', 0, 2, 0.01, 0.8),
+      f('waterLevel', 'Water Level', 0, 1, 0.01, 0.28),
+      f('angle', 'Angle', 0, 6.28, 0.01, 0.2),
+      f('speed', 'Drift', -2, 2, 0.01, 0.08),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      vec2 p = uv - vec2(0.5 * asp2, 0.5);
+      mat2 R = mat2(cos(angle), -sin(angle), sin(angle), cos(angle));
+      vec2 q = R * p * scale + vec2(t * speed, -t * speed * 0.6);
+
+      float broad = fbm(q * 0.72);
+      float detail = fbm(q * 2.4 + broad * 3.0 + 19.7);
+      float height = clamp(mix(broad, detail, roughness * 0.45), 0.0, 1.0);
+      height = smoothstep(0.02, 0.98, height);
+
+      float banded = floor(height * contours) / max(contours, 1.0);
+      float terrain = mix(height, banded, terrace);
+      vec3 land = mix(low, high, terrain);
+      land *= 0.82 + 0.28 * detail;
+
+      float waterMask = 1.0 - smoothstep(waterLevel - 0.025, waterLevel + 0.025, height);
+      vec3 waterCol = water * (0.72 + 0.28 * fbm(q * 6.0 + t * speed));
+      vec3 mapCol = mix(land, waterCol, waterMask);
+
+      float contourPos = abs(fract(height * contours) - 0.5);
+      float major = step(0.985, fract(height * contours * 0.2));
+      float width = lineWidth * mix(1.0, 1.9, major);
+      float line = smoothstep(width, 0.0, contourPos);
+      line *= smoothstep(waterLevel + 0.015, waterLevel + 0.08, height);
+
+      float shore = smoothstep(0.035, 0.0, abs(height - waterLevel));
+      mapCol = mix(mapCol, lineCol, max(line, shore * 0.65));
+      col = clamp(mapCol, 0.0, 1.0);
+    `,
+  },
+  {
+    id: 'inkwash',
+    name: 'Ink Wash',
+    kind: 'generate',
+    params: [
+      c('paper', 'Paper', '#f2ead8'),
+      c('ink', 'Ink', '#111018'),
+      c('wash', 'Wash', '#4d5a73'),
+      c('stain', 'Stain', '#b46a4a'),
+      f('scale', 'Scale', 0.5, 16, 0.1, 4.2),
+      f('blooms', 'Blooms', 1, 18, 0.1, 7),
+      f('bleed', 'Bleed', 0, 3, 0.01, 1.15),
+      f('edge', 'Edge Darkening', 0, 3, 0.01, 1.3),
+      f('pigment', 'Pigment', 0, 2, 0.01, 0.7),
+      f('paperGrain', 'Paper Grain', 0, 0.5, 0.005, 0.12),
+      f('contrast', 'Contrast', 0.4, 5, 0.01, 1.7),
+      f('speed', 'Drift', -2, 2, 0.01, 0.12),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      vec2 p = uv - vec2(0.5 * asp2, 0.5);
+      vec2 q = p * scale;
+      float mt = t * speed;
+
+      float n1 = fbm(q * 0.65 + vec2(mt, -mt * 0.35));
+      float n2 = fbm(q * 1.6 + n1 * 3.2 + vec2(-mt * 0.45, mt * 0.25));
+      q += bleed * vec2(n1 - 0.5, n2 - 0.5);
+
+      float washField = fbm(q * 0.75 + n2 * 2.0);
+      float bloomField = 0.5 + 0.5 * sin((q.x + q.y * 0.45 + n1 * 3.0) * blooms);
+      float bloom = smoothstep(0.28, 0.92, washField * 0.7 + bloomField * 0.45);
+      bloom = pow(clamp(bloom, 0.0, 1.0), contrast);
+
+      float rim = smoothstep(0.08, 0.0, abs(bloom - 0.48)) * edge;
+      float gran = hash21(floor(gl_FragCoord.xy * 0.75) + floor(t * 3.0));
+      float paperNoise = fbm(uv * u_res / 180.0);
+      vec3 paperCol = paper * (1.0 + (paperNoise - 0.5) * paperGrain);
+
+      vec3 washCol = mix(wash, ink, bloom * 0.8 + rim * 0.25);
+      washCol *= 0.82 + pigment * 0.25 * gran;
+      vec3 stainCol = mix(washCol, stain, smoothstep(0.72, 1.0, n2) * 0.35);
+      float alpha = clamp(bloom * 0.82 + rim * 0.35, 0.0, 1.0);
+
+      col = mix(paperCol, stainCol, alpha);
+      col = clamp(col, 0.0, 1.0);
+    `,
+  },
+  {
     id: 'plasma',
     name: 'Plasma',
     kind: 'generate',
@@ -804,6 +945,32 @@ export const EFFECTS: EffectDef[] = [
       float luma = dot(col, vec3(0.299, 0.587, 0.114));
       float m = smoothstep(cutoff - softness - 0.001, cutoff + softness, luma);
       col = mix(dark, light, m);
+    `,
+  },
+  {
+    id: 'gradmap',
+    name: 'Duotone / Gradient Map',
+    kind: 'modify',
+    params: [
+      c('shadow', 'Shadow', '#12061f'),
+      c('mid', 'Midtone', '#ff2d96'),
+      c('highlight', 'Highlight', '#f8f3dc'),
+      f('midpoint', 'Midpoint', 0.05, 0.95, 0.01, 0.5),
+      f('blendAmt', 'Blend', 0, 1, 0.01, 1),
+      f('contrast', 'Contrast', 0.2, 4, 0.01, 1),
+      f('gamma', 'Gamma', 0.2, 3, 0.01, 1),
+      f('shift', 'Shift', -1, 1, 0.01, 0),
+      f('animate', 'Animate', -2, 2, 0.01, 0),
+    ],
+    glsl: `
+      float luma = dot(col, vec3(0.299, 0.587, 0.114));
+      luma = pow(clamp(luma, 0.0, 1.0), gamma);
+      luma = clamp((luma - 0.5) * contrast + 0.5 + shift + t * animate * 0.1, 0.0, 1.0);
+      float mp = clamp(midpoint, 0.01, 0.99);
+      vec3 mapped = luma < mp
+        ? mix(shadow, mid, smoothstep(0.0, mp, luma))
+        : mix(mid, highlight, smoothstep(mp, 1.0, luma));
+      col = mix(col, mapped, blendAmt);
     `,
   },
   {

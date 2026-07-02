@@ -433,6 +433,105 @@ export const EFFECTS: EffectDef[] = [
     `,
   },
   {
+    id: 'watercolor',
+    name: 'Watercolor Bloom',
+    kind: 'generate',
+    params: [
+      c('paper', 'Paper', '#f7efe0'),
+      c('washA', 'Wash A', '#5fb7d4'),
+      c('washB', 'Wash B', '#d66bff'),
+      c('washC', 'Wash C', '#ffd166'),
+      c('edgeCol', 'Wet Edge', '#4a356b'),
+      f('scale', 'Scale', 0.5, 16, 0.1, 3.6),
+      f('blooms', 'Blooms', 1, 18, 0.1, 6.5),
+      f('bleed', 'Bleed', 0, 3, 0.01, 1.35),
+      f('wetEdge', 'Wet Edge', 0, 3, 0.01, 1.15),
+      f('granulation', 'Granulation', 0, 2, 0.01, 0.65),
+      f('paperGrain', 'Paper Grain', 0, 0.5, 0.005, 0.1),
+      f('opacity', 'Pigment', 0, 2, 0.01, 0.95),
+      f('speed', 'Drift', -2, 2, 0.01, 0.08),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      vec2 p = uv - vec2(0.5 * asp2, 0.5);
+      vec2 q = p * scale;
+      float mt = t * speed;
+
+      float paperNoise = fbm(uv * u_res / 150.0);
+      float tooth = hash21(floor(gl_FragCoord.xy * 0.65));
+      vec3 paperCol = paper * (1.0 + (paperNoise - 0.5) * paperGrain + (tooth - 0.5) * paperGrain * 0.55);
+
+      float n1 = fbm(q * 0.72 + vec2(mt, -mt * 0.32));
+      float n2 = fbm(q * 1.55 + n1 * 3.8 + vec2(-mt * 0.45, mt * 0.18));
+      vec2 warped = q + bleed * vec2(n1 - 0.5, n2 - 0.5);
+
+      float softPool = fbm(warped * 0.62 + n2 * 1.6);
+      float bloomWave = 0.5 + 0.5 * sin((warped.x * 0.82 + warped.y * 0.38 + n1 * 3.2) * blooms);
+      float pool = smoothstep(0.2, 0.92, softPool * 0.72 + bloomWave * 0.38);
+      float feather = fbm(warped * 3.2 + pool * 2.5);
+      pool *= 0.72 + 0.38 * feather;
+      pool = clamp(pool, 0.0, 1.0);
+
+      float edgeMask = smoothstep(0.08, 0.0, abs(pool - 0.48));
+      float backrun = smoothstep(0.58, 0.96, fbm(warped * 2.0 - n1 * 2.2 + 31.0))
+        * smoothstep(0.18, 0.92, pool);
+      float gran = (hash21(floor(gl_FragCoord.xy / 2.0) + floor(t * 2.0)) - 0.5)
+        * granulation * smoothstep(0.12, 0.95, pool);
+
+      vec3 washMix = mix(washA, washB, n2);
+      washMix = mix(washMix, washC, smoothstep(0.58, 1.0, n1) * 0.55);
+      washMix *= 1.0 + gran;
+      vec3 stained = mix(washMix, edgeCol, edgeMask * wetEdge * 0.45);
+      stained = mix(stained, paperCol, backrun * 0.28);
+
+      float alpha = clamp(pool * opacity + edgeMask * wetEdge * 0.18, 0.0, 1.0);
+      col = mix(paperCol, stained, alpha);
+      col = clamp(col, 0.0, 1.0);
+    `,
+  },
+  {
+    id: 'cloudedglass',
+    name: 'Clouded Glass',
+    kind: 'generate',
+    params: [
+      c('glass', 'Glass Tint', '#bfe7f5'),
+      c('frost', 'Frost', '#f4fbff'),
+      c('shadow', 'Shadow', '#40606f'),
+      c('stain', 'Condensation', '#8fb7c6'),
+      f('scale', 'Scale', 0.5, 16, 0.1, 4.5),
+      f('clouds', 'Clouds', 0, 2, 0.01, 0.9),
+      f('haze', 'Haze', 0, 2, 0.01, 0.85),
+      f('contrast', 'Contrast', 0.4, 4, 0.01, 1.35),
+      f('speed', 'Drift', -2, 2, 0.01, 0.08),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      vec2 p = uv - vec2(0.5 * asp2, 0.5);
+      vec2 q = p * scale;
+      float mt = t * speed;
+
+      float n1 = fbm(q * 0.55 + vec2(mt * 0.35, -mt * 0.18));
+      float n2 = fbm(q * 1.35 + n1 * 3.5 + vec2(-mt * 0.22, mt * 0.12));
+      float n3 = fbm(q * 3.1 + n2 * 2.2 + 17.0);
+
+      float cloudy = smoothstep(0.18, 0.96, n1 * clouds + n2 * 0.55);
+      cloudy = pow(clamp(cloudy, 0.0, 1.0), contrast);
+      float milk = smoothstep(0.2, 0.92, cloudy + n3 * 0.22);
+
+      float condensation = smoothstep(0.58, 0.98, fbm(q * 2.2 + n1 * 2.6 - mt * 0.18))
+        * smoothstep(0.12, 0.88, cloudy)
+        * haze * 0.28;
+      float softVeil = fbm(q * 5.5 + n2 * 1.8 + 43.0) * haze * 0.08;
+
+      vec3 baseCol = mix(glass, frost, milk * haze);
+      baseCol = mix(baseCol, shadow, (1.0 - cloudy) * 0.28);
+      baseCol = mix(baseCol, stain, condensation);
+      baseCol += frost * softVeil;
+      baseCol *= 0.9 + 0.18 * n3;
+      col = clamp(baseCol, 0.0, 1.0);
+    `,
+  },
+  {
     id: 'plasma',
     name: 'Plasma',
     kind: 'generate',

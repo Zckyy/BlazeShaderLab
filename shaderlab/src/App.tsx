@@ -72,6 +72,11 @@ function makeDefaultLayers(): Layer[] {
 const DEFAULT_LAYERS: Layer[] = makeDefaultLayers()
 
 const STORAGE_KEY = 'shaderlab-project'
+const PNG_EXPORT_SIZES = [
+  { label: '1080p', width: 1920, height: 1080 },
+  { label: '1440p', width: 2560, height: 1440 },
+  { label: '4K', width: 3840, height: 2160 },
+]
 
 // Rebuilds layers from untrusted/saved JSON: unknown effects are dropped,
 // missing params get defaults, uids are regenerated.
@@ -369,14 +374,26 @@ export default function App() {
     prevRects.current = next
   }, [layers])
 
-  const snapshot = () => {
-    canvasRef.current!.toBlob((blob) => {
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  const exportPNG = (width: number, height: number) => {
+    const canvas = document.createElement('canvas')
+    const renderer = new Renderer(canvas)
+    renderer.rebuild(layersRef.current)
+    if (renderer.error) {
+      setError(renderer.error)
+      return
+    }
+    renderer.renderFixed(layersRef.current, timeRef.current, width, height)
+    canvas.toBlob((blob) => {
       if (!blob) return
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = 'shaderlab.png'
-      a.click()
-      URL.revokeObjectURL(a.href)
+      downloadBlob(blob, `shaderlab-${width}x${height}.png`)
     }, 'image/png')
   }
 
@@ -455,9 +472,19 @@ export default function App() {
             </button>
             {exportOpen && (
               <div className="export-menu">
-                <button onClick={() => { snapshot(); setExportOpen(false) }}>
-                  PNG <em>image</em>
-                </button>
+                <div className="export-menu-label">PNG</div>
+                {PNG_EXPORT_SIZES.map((size) => (
+                  <button
+                    key={size.label}
+                    onClick={() => {
+                      exportPNG(size.width, size.height)
+                      setExportOpen(false)
+                    }}
+                  >
+                    {size.label} <em>{size.width}×{size.height}</em>
+                  </button>
+                ))}
+                <div className="export-menu-label">Source</div>
                 <button onClick={() => { exportGLSL(); setExportOpen(false) }}>
                   GLSL <em>clipboard</em>
                 </button>

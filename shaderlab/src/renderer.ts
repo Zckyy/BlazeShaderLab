@@ -131,16 +131,9 @@ export class Renderer {
     return this.uniformLocs.get(name) ?? null
   }
 
-  render(layers: Layer[], time: number) {
+  private draw(layers: Layer[], time: number, w: number, h: number) {
     const gl = this.gl
     if (!this.program) return
-    const canvas = gl.canvas as HTMLCanvasElement
-    const w = canvas.clientWidth * Math.min(devicePixelRatio, 2)
-    const h = canvas.clientHeight * Math.min(devicePixelRatio, 2)
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w
-      canvas.height = h
-    }
     gl.viewport(0, 0, w, h)
     gl.useProgram(this.program)
     gl.uniform2f(this.loc('u_res'), w, h)
@@ -164,5 +157,25 @@ export class Renderer {
       if (lop) gl.uniform1f(lop, layer.opacity)
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3)
+  }
+
+  render(layers: Layer[], time: number) {
+    const canvas = this.gl.canvas as HTMLCanvasElement
+    const w = Math.floor(canvas.clientWidth * Math.min(devicePixelRatio, 2))
+    const h = Math.floor(canvas.clientHeight * Math.min(devicePixelRatio, 2))
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w
+      canvas.height = h
+    }
+    this.draw(layers, time, w, h)
+  }
+
+  renderFixed(layers: Layer[], time: number, width: number, height: number) {
+    const canvas = this.gl.canvas as HTMLCanvasElement
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width
+      canvas.height = height
+    }
+    this.draw(layers, time, width, height)
   }
 }

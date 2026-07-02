@@ -254,6 +254,90 @@ function NumberValueInput({
   )
 }
 
+function FontPreviewSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: string
+  options: string[]
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const currentIndex = Math.max(0, options.indexOf(value))
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const previewAt = (index: number) => {
+    const next = options[(index + options.length) % options.length]
+    if (next && next !== value) onChange(next)
+  }
+
+  return (
+    <div className="font-picker" ref={wrapRef}>
+      <button
+        type="button"
+        className="font-picker-btn"
+        style={{ fontFamily: `"${value}"` }}
+        onClick={() => setOpen((next) => !next)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            setOpen(true)
+            previewAt(currentIndex + 1)
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setOpen(true)
+            previewAt(currentIndex - 1)
+          } else if (e.key === 'Home') {
+            e.preventDefault()
+            setOpen(true)
+            previewAt(0)
+          } else if (e.key === 'End') {
+            e.preventDefault()
+            setOpen(true)
+            previewAt(options.length - 1)
+          } else if (e.key === 'Escape') {
+            setOpen(false)
+          } else if (e.key === 'Enter') {
+            setOpen((next) => !next)
+          }
+        }}
+      >
+        {value}
+      </button>
+      {open && (
+        <div className="font-picker-menu" role="listbox">
+          {options.map((option) => (
+            <button
+              type="button"
+              key={option}
+              className={option === value ? 'on' : ''}
+              style={{ fontFamily: `"${option}"` }}
+              onMouseEnter={() => onChange(option)}
+              onFocus={() => onChange(option)}
+              onClick={() => {
+                onChange(option)
+                setOpen(false)
+              }}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Rebuilds layers from untrusted/saved JSON: unknown effects are dropped,
 // missing params get defaults, uids are regenerated.
 function sanitizeLayers(raw: unknown): Layer[] | null {
@@ -1080,20 +1164,31 @@ export default function App() {
                 }
                 if (p.type === 'select') {
                   const cur = typeof v === 'string' ? v : p.def
+                  const setSelectValue = (value: string) =>
+                    updateLayer(sel.uid, {
+                      values: { ...sel.values, [p.key]: value },
+                    })
+                  if (p.key === 'font') {
+                    return (
+                      <label key={p.key}>
+                        <span>{p.label}</span>
+                        <FontPreviewSelect
+                          value={cur}
+                          options={p.options}
+                          onChange={setSelectValue}
+                        />
+                      </label>
+                    )
+                  }
                   return (
                     <label key={p.key}>
                       <span>{p.label}</span>
                       <select
                         value={cur}
-                        style={p.key === 'font' ? { fontFamily: `"${cur}"` } : undefined}
-                        onChange={(e) =>
-                          updateLayer(sel.uid, {
-                            values: { ...sel.values, [p.key]: e.target.value },
-                          })
-                        }
+                        onChange={(e) => setSelectValue(e.target.value)}
                       >
                         {p.options.map((o) => (
-                          <option key={o} value={o} style={p.key === 'font' ? { fontFamily: `"${o}"` } : undefined}>
+                          <option key={o} value={o}>
                             {o}
                           </option>
                         ))}

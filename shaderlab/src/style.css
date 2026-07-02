@@ -335,6 +335,65 @@ select {
   padding: 5px 8px; font-size: 11px;
 }
 
+.font-picker { position: relative; }
+.font-picker-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  font-size: 13px;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.font-picker-btn::after {
+  content: '▾';
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+.font-picker-btn:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.font-picker-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+}
+.font-picker-menu button {
+  width: 100%;
+  display: block;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 10px;
+  color: var(--text);
+  background: transparent;
+  font-size: 15px;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.font-picker-menu button:last-child { border-bottom: none; }
+.font-picker-menu button:hover,
+.font-picker-menu button:focus,
+.font-picker-menu button.on {
+  color: #000;
+  background: var(--accent);
+  outline: none;
+}
+
 .layer .lock { color: var(--muted); opacity: 0; }
 .layer:hover .lock, .layer .lock.on { opacity: 1; }
 .layer .lock.on { color: var(--accent); }

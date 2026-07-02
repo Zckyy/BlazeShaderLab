@@ -1,0 +1,5 @@
+{
+  "installCommand": "npm --prefix shaderlab ci",
+  "buildCommand": "npm --prefix shaderlab run build",
+  "outputDirectory": "shaderlab/dist"
+}

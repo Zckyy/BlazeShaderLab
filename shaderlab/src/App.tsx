@@ -958,6 +958,8 @@ export default function App() {
     timeRef.current = t
   }
 
+  const customSize = aspect === 'custom' ? { width: customW, height: customH } : null
+
   const sel = layers.find((l) => l.uid === selected) ?? null
   const selFx = sel ? EFFECT_MAP.get(sel.effectId)! : null
 
@@ -990,6 +992,17 @@ export default function App() {
             {exportOpen && (
               <div className="export-menu">
                 <div className="export-menu-label">PNG</div>
+                {customSize && (
+                  <button
+                    disabled={exporting !== null}
+                    onClick={() => {
+                      exportPNG(customSize.width, customSize.height)
+                      setExportOpen(false)
+                    }}
+                  >
+                    Custom <em>{customSize.width}×{customSize.height}</em>
+                  </button>
+                )}
                 {PNG_EXPORT_SIZES.map((size) => (
                   <button
                     key={size.label}
@@ -1026,6 +1039,17 @@ export default function App() {
                   </div>
                 ))}
                 <div className="export-menu-label">GIF <em>4s / 25fps</em></div>
+                {customSize && (
+                  <button
+                    disabled={exporting !== null}
+                    onClick={() => {
+                      void exportGIF(customSize.width, customSize.height)
+                      setExportOpen(false)
+                    }}
+                  >
+                    Custom <em>{customSize.width}×{customSize.height}</em>
+                  </button>
+                )}
                 {GIF_EXPORT_SIZES.map((size) => (
                   <button
                     key={size.label}
@@ -1039,6 +1063,17 @@ export default function App() {
                   </button>
                 ))}
                 <div className="export-menu-label">MP4 <em>4s / 30fps</em></div>
+                {customSize && (
+                  <button
+                    disabled={exporting !== null}
+                    onClick={() => {
+                      void exportMP4(customSize.width, customSize.height)
+                      setExportOpen(false)
+                    }}
+                  >
+                    Custom <em>{customSize.width}×{customSize.height}</em>
+                  </button>
+                )}
                 {MP4_EXPORT_SIZES.map((size) => (
                   <button
                     key={size.label}

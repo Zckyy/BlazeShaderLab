@@ -14,6 +14,56 @@ export interface Preset {
 
 export const PRESETS: Preset[] = [
   {
+    name: 'Marble Dreams',
+    layers: [
+      {
+        effectId: 'marbleagate',
+        values: {
+          base: '#111018',
+          veinA: '#f2efe5',
+          veinB: '#54d3c2',
+          accent: '#d66bff',
+          scale: 5.2,
+          rings: 5.5,
+          warp: 1.25,
+          turbulence: 0.75,
+          sharpness: 2.6,
+          contrast: 1.4,
+          angle: 0.45,
+          speed: 0.22,
+        },
+      },
+      { effectId: 'chromab', values: { amount: 1, radial: 1 } },
+      { effectId: 'grain', values: { amount: 0.1, gsize: 1 } },
+    ],
+  },
+  {
+    name: 'Cinnamoroll',
+    layers: [
+      {
+        effectId: 'cloudedglass',
+        values: {
+          glass: '#bfe7f5',
+          frost: '#f4fbff',
+          shadow: '#1978a4',
+          stain: '#39acd5',
+          scale: 8,
+          clouds: 0.8,
+          haze: 0.75,
+          contrast: 1.7,
+          speed: -0.4,
+        },
+      },
+      {
+        effectId: 'starfield',
+        values: { tint: '#ffffff', colA: '#020210', density: 16, speed: 0.08, twinkle: 3.7 },
+        opacity: 0.24,
+        blend: 'add',
+      },
+      { effectId: 'chromab', values: { amount: 1, radial: 1 } },
+    ],
+  },
+  {
     name: 'Cyberpunk',
     layers: [
       { effectId: 'plasma', values: { scale: 8.5, speed: 0.56, shift: 0.95 } },

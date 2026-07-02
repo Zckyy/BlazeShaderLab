@@ -279,9 +279,28 @@ button:disabled:hover { color: #333; border-color: var(--border); background: tr
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
   color: var(--muted);
 }
-.props label b {
-  color: var(--text); font-weight: 400;
+.value-input {
+  width: 64px;
+  height: 20px;
+  background: #070707;
+  color: var(--text);
+  border: 1px solid transparent;
+  padding: 2px 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  text-align: right;
   font-variant-numeric: tabular-nums;
+}
+.value-input:hover { border-color: var(--border); }
+.value-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--panel2);
+}
+.value-input::-webkit-outer-spin-button,
+.value-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 input[type='range'] {

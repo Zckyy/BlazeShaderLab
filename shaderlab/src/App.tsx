@@ -93,6 +93,104 @@ const DISCORD_EXPORTS = [
 const GIF_EXPORT = { duration: 4, fps: 25 }
 const MP4_EXPORT = { duration: 4, fps: 30 }
 
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function decimalsForStep(step: number) {
+  const text = step.toString()
+  const decimal = text.includes('e-')
+    ? Number(text.split('e-')[1])
+    : text.includes('.')
+      ? text.split('.')[1].length
+      : 0
+  return Math.min(4, decimal)
+}
+
+function formatNumber(value: number, step: number) {
+  const decimals = decimalsForStep(step)
+  const formatted = value.toFixed(decimals)
+  return formatted.includes('.') ? formatted.replace(/\.?0+$/, '') : formatted
+}
+
+function snapValue(value: number, min: number, step: number) {
+  const decimals = decimalsForStep(step)
+  const snapped = min + Math.round((value - min) / step) * step
+  return Number(snapped.toFixed(decimals + 2))
+}
+
+function sliderStepFor(min: number, max: number, baseStep: number) {
+  const range = max - min
+  if (range >= 100) return Math.max(baseStep, 1)
+  if (range >= 20) return Math.max(baseStep, 0.5)
+  if (range >= 5) return Math.max(baseStep, 0.1)
+  if (range >= 2) return Math.max(baseStep, 0.05)
+  return baseStep
+}
+
+function NumberValueInput({
+  value,
+  min,
+  max,
+  step,
+  onCommit,
+}: {
+  value: number
+  min: number
+  max: number
+  step: number
+  onCommit: (value: number) => void
+}) {
+  const [draft, setDraft] = useState(formatNumber(value, step))
+  const [focused, setFocused] = useState(false)
+
+  useEffect(() => {
+    if (!focused) setDraft(formatNumber(value, step))
+  }, [focused, step, value])
+
+  const commit = (raw: string) => {
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) {
+      setDraft(formatNumber(value, step))
+      return
+    }
+    const next = snapValue(clampNumber(parsed, min, max), min, step)
+    onCommit(next)
+    setDraft(formatNumber(next, step))
+  }
+
+  return (
+    <input
+      className="value-input"
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={draft}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => {
+        const raw = e.target.value
+        setDraft(raw)
+        const parsed = Number(raw)
+        if (raw !== '' && Number.isFinite(parsed)) {
+          onCommit(clampNumber(parsed, min, max))
+        }
+      }}
+      onBlur={(e) => {
+        setFocused(false)
+        commit(e.target.value)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+        if (e.key === 'Escape') {
+          setDraft(formatNumber(value, step))
+          e.currentTarget.blur()
+        }
+      }}
+    />
+  )
+}
+
 // Rebuilds layers from untrusted/saved JSON: unknown effects are dropped,
 // missing params get defaults, uids are regenerated.
 function sanitizeLayers(raw: unknown): Layer[] | null {
@@ -888,29 +986,45 @@ export default function App() {
                   )
                 }
                 const num = typeof v === 'number' ? v : p.def
+                const sliderStep = sliderStepFor(p.min, p.max, p.step)
+                const setParamValue = (value: number) =>
+                  updateLayer(sel.uid, {
+                    values: { ...sel.values, [p.key]: clampNumber(value, p.min, p.max) },
+                  })
                 return (
                   <label key={p.key}>
                     <span>
-                      {p.label} <b>{num.toFixed(2)}</b>
+                      {p.label}
+                      <NumberValueInput
+                        value={num}
+                        min={p.min}
+                        max={p.max}
+                        step={p.step}
+                        onCommit={setParamValue}
+                      />
                     </span>
                     <input
                       type="range"
                       min={p.min}
                       max={p.max}
-                      step={p.step}
+                      step={sliderStep}
                       value={num}
-                      onChange={(e) =>
-                        updateLayer(sel.uid, {
-                          values: { ...sel.values, [p.key]: Number(e.target.value) },
-                        })
-                      }
+                      title={`Slider snaps by ${formatNumber(sliderStep, sliderStep)}. Type a value for finer control.`}
+                      onChange={(e) => setParamValue(Number(e.target.value))}
                     />
                   </label>
                 )
               })}
               <label>
                 <span>
-                  Opacity <b>{sel.opacity.toFixed(2)}</b>
+                  Opacity
+                  <NumberValueInput
+                    value={sel.opacity}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    onCommit={(value) => updateLayer(sel.uid, { opacity: clampNumber(value, 0, 1) })}
+                  />
                 </span>
                 <input
                   type="range"
@@ -918,7 +1032,9 @@ export default function App() {
                   max={1}
                   step={0.01}
                   value={sel.opacity}
-                  onChange={(e) => updateLayer(sel.uid, { opacity: Number(e.target.value) })}
+                  onChange={(e) =>
+                    updateLayer(sel.uid, { opacity: clampNumber(Number(e.target.value), 0, 1) })
+                  }
                 />
               </label>
               <label>

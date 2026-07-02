@@ -64,6 +64,14 @@ float bayer2(vec2 a) {
 float bayer8(vec2 a) {
   return bayer2(a / 4.0) * 0.0625 + bayer2(a / 2.0) * 0.25 + bayer2(a);
 }
+// pixel-grid effects (ASCII, Dither, Voxel) size their cells in raw screen
+// pixels; without this they look fine at the editor's canvas size but turn
+// into giant blocks at small export resolutions. Scaling by canvas height
+// against a 1080p reference keeps the same slider value looking the same
+// density at any output size.
+float pxScale() {
+  return max(u_res.y, 1.0) / 1080.0;
+}
 vec3 aces(vec3 x) {
   return clamp((x * (2.51 * x + 0.03)) / (x * (0.43 * x + 0.59) + 0.14), 0.0, 1.0);
 }
@@ -884,7 +892,7 @@ export const EFFECTS: EffectDef[] = [
       const float SQRT3 = 1.73205080757;
       const int STACK_LIMIT = 8;
       vec2 pix = gl_FragCoord.xy;
-      float s = max(cellSize, 4.0);
+      float s = max(cellSize, 4.0) * pxScale();
       float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
       float height = mix(1.0, 1.0 + luma * (clamp(maxHeight, 1.0, 8.0) - 1.0), depth);
 
@@ -996,9 +1004,10 @@ export const EFFECTS: EffectDef[] = [
     glsl: `
       float luma = dot(col, vec3(0.299, 0.587, 0.114));
       mat2 R = mat2(cos(angle), -sin(angle), sin(angle), cos(angle));
+      float ds = dotSize * pxScale();
       vec2 q = R * gl_FragCoord.xy;
-      vec2 g = mod(q, dotSize) - 0.5 * dotSize;
-      float r = sqrt(clamp(luma, 0.0, 1.0)) * dotSize * 0.65;
+      vec2 g = mod(q, ds) - 0.5 * ds;
+      float r = sqrt(clamp(luma, 0.0, 1.0)) * ds * 0.65;
       float m = smoothstep(r, r - 1.5, length(g));
       vec3 inkCol = mix(ink, col / max(luma, 0.001), colorize);
       col = mix(paper, inkCol, m);
@@ -1014,7 +1023,7 @@ export const EFFECTS: EffectDef[] = [
       c('ink', 'Ink', '#ffffff'),
     ],
     glsl: `
-      vec2 g = fract(gl_FragCoord.xy / max(cellSize, 2.0)) * 2.0 - 1.0;
+      vec2 g = fract(gl_FragCoord.xy / (max(cellSize, 2.0) * pxScale())) * 2.0 - 1.0;
       float luma = dot(col, vec3(0.299, 0.587, 0.114));
       float dotm = step(length(g), 0.3);
       float plus = max(step(abs(g.x), 0.16), step(abs(g.y), 0.16))
@@ -1159,7 +1168,7 @@ export const EFFECTS: EffectDef[] = [
       f('spread', 'Spread', 0, 2, 0.01, 1),
     ],
     glsl: `
-      vec2 px = floor(gl_FragCoord.xy / max(pxSize, 1.0));
+      vec2 px = floor(gl_FragCoord.xy / (max(pxSize, 1.0) * pxScale()));
       float d = (bayer8(px) - 0.5) * spread;
       float lv = max(levels - 1.0, 1.0);
       col = floor(col * lv + d + 0.5) / lv;

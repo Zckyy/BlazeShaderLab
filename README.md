@@ -2,6 +2,8 @@ https://shaderlab-eight.vercel.app/
 
 <img width="2558" height="1270" alt="image" src="https://github.com/user-attachments/assets/64c8fa1a-5898-4050-b9b3-af0d1e52f5aa" />
 
+<img width="1280" height="720" alt="shaderlab-1280x720" src="https://github.com/user-attachments/assets/0a34fd02-dbae-4182-8d17-8c77423dd9fc" />
+
 # BlazeShaderLab
 
 BlazeShaderLab is a browser-based shader art tool for building animated visuals from a stack of generator and effect layers. It is designed for quick experimentation: add layers, tweak parameters, preview motion in real time, and export stills or short animations without writing GLSL by hand.

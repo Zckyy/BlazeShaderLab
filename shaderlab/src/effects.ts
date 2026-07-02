@@ -1,3 +1,5 @@
+import { FONTS, DEFAULT_FONT, TEXT_STYLES } from './fonts.ts'
+
 // Effect definitions. Each effect is a GLSL snippet that mutates uv and/or col.
 // Params are named and typed: floats become `float <key>`, colors become `vec3 <key>`
 // arguments of the generated function, in declaration order.
@@ -5,6 +7,12 @@
 export type ParamDef =
   | { key: string; label: string; type?: 'float'; min: number; max: number; step: number; def: number }
   | { key: string; label: string; type: 'color'; def: string }
+  | { key: string; label: string; type: 'text'; def: string }
+  | { key: string; label: string; type: 'select'; options: string[]; def: string }
+
+// text/select params configure the layer's texture (CPU side) rather than
+// becoming shader uniforms
+export const isUniformParam = (p: ParamDef) => p.type !== 'text' && p.type !== 'select'
 
 export interface EffectDef {
   id: string
@@ -12,6 +20,8 @@ export interface EffectDef {
   kind: 'generate' | 'modify'
   params: ParamDef[]
   glsl: string
+  // effect samples a per-layer canvas texture (passed as `sampler2D tex`)
+  texture?: boolean
 }
 
 export const GLSL_HELPERS = /* glsl */ `
@@ -375,6 +385,53 @@ export const EFFECTS: EffectDef[] = [
       fv.x = mix(fv.x, 1.0 - fv.x, flip);
       float d = min(abs(length(fv) - 0.5), abs(length(fv - 1.0) - 0.5));
       col = mix(colA, colB, smoothstep(width, width - 0.03, d));
+    `,
+  },
+  {
+    id: 'text',
+    name: 'Text',
+    kind: 'generate',
+    texture: true,
+    params: [
+      { key: 'txt', label: 'Text', type: 'text', def: 'BLAZE' },
+      { key: 'font', label: 'Font', type: 'select', options: FONTS.map((ft) => ft.family), def: DEFAULT_FONT.family },
+      { key: 'style', label: 'Style', type: 'select', options: [...TEXT_STYLES], def: 'Fill' },
+      c('fill', 'Fill', '#ffffff'),
+      c('fill2', 'Gradient Fill', '#ff2d96'),
+      f('grad', 'Gradient', 0, 1, 0.01, 0),
+      c('outCol', 'Outline', '#00d5ff'),
+      f('size', 'Size', 0.05, 2, 0.01, 0.8),
+      f('posX', 'X', -1, 1, 0.01, 0),
+      f('posY', 'Y', -1, 1, 0.01, 0),
+      f('rot', 'Rotate', -3.14, 3.14, 0.01, 0),
+      f('spin', 'Spin', -3, 3, 0.01, 0),
+      f('wobble', 'Wobble', 0, 0.2, 0.005, 0),
+      f('wspeed', 'Wobble Speed', 0, 8, 0.05, 2),
+      f('glitch', 'Glitch', 0, 0.3, 0.005, 0),
+      f('shadowX', 'Shadow X', -0.3, 0.3, 0.005, 0),
+      f('shadowY', 'Shadow Y', -0.3, 0.3, 0.005, 0),
+      c('shadowCol', 'Shadow', '#000000'),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      vec2 p = uv - vec2(0.5 * asp2 + posX * 0.5 * asp2, 0.5 + posY * 0.5);
+      float ang = rot + t * spin;
+      float ca = cos(ang);
+      float sa = sin(ang);
+      p = mat2(ca, -sa, sa, ca) * p;
+      p.y += sin(p.x * 14.0 + t * wspeed) * wobble;
+      vec2 tuv = p / max(size, 0.001) + 0.5;
+      tuv.y = 1.0 - tuv.y;
+      tuv.x += (hash21(vec2(floor(tuv.y * 24.0), floor(t * 9.0))) - 0.5) * glitch;
+      vec2 suv = tuv - vec2(shadowX, -shadowY);
+      float inS = step(0.0, suv.x) * step(suv.x, 1.0) * step(0.0, suv.y) * step(suv.y, 1.0);
+      float inT = step(0.0, tuv.x) * step(tuv.x, 1.0) * step(0.0, tuv.y) * step(tuv.y, 1.0);
+      float sm = texture(tex, clamp(suv, 0.0, 1.0)).a * inS;
+      col = mix(col, shadowCol, sm);
+      vec4 tx = texture(tex, clamp(tuv, 0.0, 1.0)) * inT;
+      vec3 fcol = mix(fill, fill2, grad * (1.0 - tuv.y));
+      col = mix(col, fcol, tx.r);
+      col = mix(col, outCol, tx.g);
     `,
   },
   {

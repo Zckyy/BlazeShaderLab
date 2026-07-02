@@ -24,6 +24,19 @@ function EyeIcon({ open }: { open: boolean }) {
   )
 }
 
+function LockIcon({ locked }: { locked: boolean }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      {locked ? (
+        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      ) : (
+        <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+      )}
+    </svg>
+  )
+}
+
 let uidCounter = 0
 const newUid = () => `l${uidCounter++}_${Math.random().toString(36).slice(2, 6)}`
 
@@ -48,6 +61,10 @@ function randomValues(effectId: string): Layer['values'] {
     if (p.type === 'color') {
       values[p.key] =
         '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0')
+    } else if (p.type === 'text') {
+      values[p.key] = p.def
+    } else if (p.type === 'select') {
+      values[p.key] = p.options[Math.floor(Math.random() * p.options.length)]
     } else {
       values[p.key] =
         Math.round((p.min + Math.random() * (p.max - p.min)) / p.step) * p.step
@@ -61,6 +78,52 @@ function makeDefaultLayers(): Layer[] {
   const spec: Array<{ effectId: string; values: Layer['values'] }> = [
     { effectId: 'plasma', values: { scale: 8.5, speed: 0.56, shift: 0.95 } },
     { effectId: 'ascii', values: { cellSize: 34, colorize: 0.69, ink: '#90601c' } },
+    {
+      effectId: 'text',
+      values: {
+        txt: 'SHADERLAB',
+        font: 'Basement Grotesque',
+        style: 'Fill + Outline',
+        fill: '#ffffff',
+        fill2: '#dbdb00',
+        grad: 0,
+        outCol: '#c712ca',
+        size: 0.35,
+        posX: 0,
+        posY: -0.1,
+        rot: 0,
+        spin: 0,
+        wobble: 0,
+        wspeed: 2,
+        glitch: 0,
+        shadowX: 0.01,
+        shadowY: -0.02,
+        shadowCol: '#000000',
+      },
+    },
+    {
+      effectId: 'text',
+      values: {
+        txt: 'BLAZE',
+        font: 'Zen Dots',
+        style: 'Fill',
+        fill: '#ffffff',
+        fill2: '#ff2d96',
+        grad: 0,
+        outCol: '#00d5ff',
+        size: 0.7,
+        posX: 0,
+        posY: 0.1,
+        rot: 0,
+        spin: 0,
+        wobble: 0,
+        wspeed: 2,
+        glitch: 0,
+        shadowX: 0.01,
+        shadowY: -0.02,
+        shadowCol: '#000000',
+      },
+    },
     { effectId: 'dither', values: { pxSize: 3, levels: 8, spread: 1.94 } },
   ]
   return spec.map(({ effectId, values }) => {
@@ -207,12 +270,17 @@ function sanitizeLayers(raw: unknown): Layer[] | null {
         const v = (l.values as Record<string, unknown>)[p.key]
         if (p.type === 'color' && typeof v === 'string' && /^#[0-9a-fA-F]{3,6}$/.test(v)) {
           base.values[p.key] = v
-        } else if (p.type !== 'color' && typeof v === 'number' && isFinite(v)) {
+        } else if (p.type === 'text' && typeof v === 'string') {
+          base.values[p.key] = v.slice(0, 200)
+        } else if (p.type === 'select' && typeof v === 'string' && p.options.includes(v)) {
+          base.values[p.key] = v
+        } else if ((p.type === undefined || p.type === 'float') && typeof v === 'number' && isFinite(v)) {
           base.values[p.key] = Math.min(p.max, Math.max(p.min, v))
         }
       }
     }
     base.enabled = l.enabled !== false
+    base.locked = l.locked === true
     base.opacity = typeof l.opacity === 'number' ? Math.min(1, Math.max(0, l.opacity)) : 1
     base.blend = l.blend === 'add' || l.blend === 'multiply' ? l.blend : 'normal'
     out.push(base)
@@ -364,6 +432,7 @@ export default function App() {
   }
 
   const removeLayer = (uid: string) => {
+    if (layersRef.current.find((l) => l.uid === uid)?.locked) return
     setLayers(layersRef.current.filter((l) => l.uid !== uid), true)
     if (selected === uid) setSelected(null)
   }
@@ -373,6 +442,7 @@ export default function App() {
     const i = arr.findIndex((l) => l.uid === uid)
     const j = i + dir
     if (i < 0 || j < 0 || j >= arr.length) return
+    if (arr[i].locked) return
     ;[arr[i], arr[j]] = [arr[j], arr[i]]
     setLayers(arr, true)
   }
@@ -392,14 +462,20 @@ export default function App() {
       }
       stack.push(l)
     }
-    const randomized = stack.map((l) => ({ ...l, values: randomValues(l.effectId) }))
+    const randomized: Layer[] = stack.map((l) => ({ ...l, values: randomValues(l.effectId) }))
+    // locked layers survive the reshuffle, staying at their original slots
+    layersRef.current.forEach((l, i) => {
+      if (l.locked) randomized.splice(Math.min(i, randomized.length), 0, l)
+    })
     setLayers(randomized, true)
     setSelected(randomized[0].uid)
   }
 
   const randomize = () => {
     setLayers(
-      layersRef.current.map((l) => ({ ...l, values: randomValues(l.effectId) }))
+      layersRef.current.map((l) =>
+        l.locked ? l : { ...l, values: randomValues(l.effectId) }
+      )
     )
   }
 
@@ -454,7 +530,8 @@ export default function App() {
     const arr = [...layersRef.current]
     const i = arr.findIndex((l) => l.uid === uid)
     if (i < 0) return
-    const copy: Layer = { ...arr[i], uid: newUid(), values: { ...arr[i].values } }
+    // copies start unlocked so they're immediately editable
+    const copy: Layer = { ...arr[i], uid: newUid(), locked: false, values: { ...arr[i].values } }
     arr.splice(i + 1, 0, copy)
     setLayers(arr, true)
     setSelected(copy.uid)
@@ -467,6 +544,8 @@ export default function App() {
       const from = arr.findIndex((l) => l.uid === fromUid)
       const to = arr.findIndex((l) => l.uid === toUid)
       if (from < 0 || to < 0) return
+      // locked layers hold their slot: can't be dragged or displaced
+      if (arr[from].locked || arr[to].locked) return
       const [moved] = arr.splice(from, 1)
       arr.splice(to, 0, moved)
       setLayers(arr, finalize)
@@ -882,9 +961,10 @@ export default function App() {
                 >
                   <span
                     className="drag-handle"
-                    title="Drag to reorder"
-                    draggable
+                    title={l.locked ? 'Locked' : 'Drag to reorder'}
+                    draggable={!l.locked}
                     onDragStart={(e) => {
+                      if (l.locked) return
                       e.dataTransfer.setData('text/plain', l.uid)
                       e.dataTransfer.effectAllowed = 'move'
                       dragUid.current = l.uid
@@ -904,15 +984,25 @@ export default function App() {
                   >
                     <EyeIcon open={l.enabled} />
                   </button>
+                  <button
+                    className={`eye lock ${l.locked ? 'on' : ''}`}
+                    title={l.locked ? 'Unlock layer' : 'Lock layer'}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      updateLayer(l.uid, { locked: !l.locked })
+                    }}
+                  >
+                    <LockIcon locked={!!l.locked} />
+                  </button>
                   <em className={`kind-badge ${fx.kind}`}>
                     {fx.kind === 'generate' ? 'GEN' : 'FX'}
                   </em>
                   <span className="layer-name">{fx.name}</span>
                   <span className="layer-btns">
                     <button onClick={(e) => { e.stopPropagation(); duplicateLayer(l.uid) }} title="Duplicate">⧉</button>
-                    <button onClick={(e) => { e.stopPropagation(); moveLayer(l.uid, 1) }} title="Move up">↑</button>
-                    <button onClick={(e) => { e.stopPropagation(); moveLayer(l.uid, -1) }} title="Move down">↓</button>
-                    <button onClick={(e) => { e.stopPropagation(); removeLayer(l.uid) }} title="Delete">✕</button>
+                    <button disabled={l.locked} onClick={(e) => { e.stopPropagation(); moveLayer(l.uid, 1) }} title="Move up">↑</button>
+                    <button disabled={l.locked} onClick={(e) => { e.stopPropagation(); moveLayer(l.uid, -1) }} title="Move down">↓</button>
+                    <button disabled={l.locked} onClick={(e) => { e.stopPropagation(); removeLayer(l.uid) }} title="Delete">✕</button>
                   </span>
                 </div>
               )
@@ -965,10 +1055,52 @@ export default function App() {
           <div className="panel-head">
             <span>{selFx ? selFx.name : 'Properties'}</span>
           </div>
-          {sel && selFx ? (
+          {sel && selFx && sel.locked ? (
+            <div className="empty">Layer locked — unlock to edit</div>
+          ) : sel && selFx ? (
             <div className="props">
               {selFx.params.map((p) => {
                 const v = sel.values[p.key]
+                if (p.type === 'text') {
+                  return (
+                    <label key={p.key}>
+                      <span>{p.label}</span>
+                      <textarea
+                        className="text-input"
+                        rows={2}
+                        value={typeof v === 'string' ? v : p.def}
+                        onChange={(e) =>
+                          updateLayer(sel.uid, {
+                            values: { ...sel.values, [p.key]: e.target.value },
+                          })
+                        }
+                      />
+                    </label>
+                  )
+                }
+                if (p.type === 'select') {
+                  const cur = typeof v === 'string' ? v : p.def
+                  return (
+                    <label key={p.key}>
+                      <span>{p.label}</span>
+                      <select
+                        value={cur}
+                        style={p.key === 'font' ? { fontFamily: `"${cur}"` } : undefined}
+                        onChange={(e) =>
+                          updateLayer(sel.uid, {
+                            values: { ...sel.values, [p.key]: e.target.value },
+                          })
+                        }
+                      >
+                        {p.options.map((o) => (
+                          <option key={o} value={o} style={p.key === 'font' ? { fontFamily: `"${o}"` } : undefined}>
+                            {o}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )
+                }
                 if (p.type === 'color') {
                   return (
                     <label key={p.key} className="color-row">

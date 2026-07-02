@@ -7,6 +7,8 @@ export interface Layer {
   uid: string
   effectId: string
   enabled: boolean
+  // locked layers can't be moved, deleted, edited, or randomized
+  locked?: boolean
   opacity: number
   blend: BlendMode
   values: Record<string, ParamValue>

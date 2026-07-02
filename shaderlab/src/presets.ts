@@ -91,6 +91,30 @@ export const PRESETS: Preset[] = [
     ],
   },
   {
+    name: 'Dot Matrix',
+    layers: [
+      {
+        effectId: 'waves',
+        values: { colA: '#ab5641', colB: '#25caa1', freq: 10, speed: 2, wobble: 2.68 },
+        opacity: 0.8,
+      },
+      {
+        effectId: 'halftone',
+        values: {
+          dotSize: 29,
+          colorize: 0.57,
+          angle: 0.63,
+          ink: '#758336',
+          paper: '#fd8937',
+        },
+      },
+      {
+        effectId: 'edges',
+        values: { strength: 6.5, colorize: 0.28, invert: 0, ink: '#45e9a3' },
+      },
+    ],
+  },
+  {
     name: 'Terminal Green CRT',
     layers: [
       {

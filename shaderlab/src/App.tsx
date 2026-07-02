@@ -508,7 +508,9 @@ export default function App() {
     window.addEventListener('mousedown', onDown)
     return () => window.removeEventListener('mousedown', onDown)
   }, [exportOpen])
-  const [aspect, setAspect] = useState<'fill' | '1:1' | '16:9' | '9:16'>('fill')
+  const [aspect, setAspect] = useState<'fill' | '1:1' | '16:9' | '9:16' | 'custom'>('fill')
+  const [customW, setCustomW] = useState(1080)
+  const [customH, setCustomH] = useState(1080)
   const dragUid = useRef<string | null>(null)
   const [draggingUid, setDraggingUid] = useState<string | null>(null)
   const rowRefs = useRef(new Map<string, HTMLDivElement>())
@@ -669,7 +671,14 @@ export default function App() {
         canvas.style.height = '100%'
         return
       }
-      const [aw, ah] = aspect === '1:1' ? [1, 1] : aspect === '16:9' ? [16, 9] : [9, 16]
+      const [aw, ah] =
+        aspect === 'custom'
+          ? [Math.max(1, customW), Math.max(1, customH)]
+          : aspect === '1:1'
+            ? [1, 1]
+            : aspect === '16:9'
+              ? [16, 9]
+              : [9, 16]
       const rect = vp.getBoundingClientRect()
       const w = Math.min(rect.width, (rect.height * aw) / ah)
       canvas.style.width = `${w}px`
@@ -679,7 +688,7 @@ export default function App() {
     const ro = new ResizeObserver(apply)
     ro.observe(vp)
     return () => ro.disconnect()
-  }, [aspect])
+  }, [aspect, customW, customH])
 
   const loadPreset = (name: string) => {
     const preset = buildPreset(name)
@@ -1193,6 +1202,25 @@ export default function App() {
                 {a === 'fill' ? 'Fill' : a}
               </button>
             ))}
+            {aspect === 'custom' ? (
+              <span className="aspect-custom">
+                <input
+                  type="number"
+                  min={1}
+                  value={customW}
+                  onChange={(e) => setCustomW(Math.max(1, Number(e.target.value) || 1))}
+                />
+                <span>×</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={customH}
+                  onChange={(e) => setCustomH(Math.max(1, Number(e.target.value) || 1))}
+                />
+              </span>
+            ) : (
+              <button onClick={() => setAspect('custom')}>Custom</button>
+            )}
           </div>
           <button
             className="fullscreen-btn"

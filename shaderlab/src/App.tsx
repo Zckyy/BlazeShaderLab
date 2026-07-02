@@ -73,58 +73,28 @@ function randomValues(effectId: string): Layer['values'] {
   return values
 }
 
-// The Cyberpunk scene shown on first load (no saved project or share link).
+// The Marble Dreams scene shown on first load (no saved project or share link).
 function makeDefaultLayers(): Layer[] {
   const spec: Array<{ effectId: string; values: Layer['values'] }> = [
-    { effectId: 'plasma', values: { scale: 8.5, speed: 0.56, shift: 0.95 } },
-    { effectId: 'ascii', values: { cellSize: 34, colorize: 0.69, ink: '#90601c' } },
     {
-      effectId: 'text',
+      effectId: 'marbleagate',
       values: {
-        txt: 'SHADERLAB',
-        font: 'Basement Grotesque',
-        style: 'Fill + Outline',
-        fill: '#ffffff',
-        fill2: '#dbdb00',
-        grad: 0,
-        outCol: '#c712ca',
-        size: 0.35,
-        posX: 0,
-        posY: -0.1,
-        rot: 0,
-        spin: 0,
-        wobble: 0,
-        wspeed: 2,
-        glitch: 0,
-        shadowX: 0.01,
-        shadowY: -0.02,
-        shadowCol: '#000000',
+        base: '#111018',
+        veinA: '#f2efe5',
+        veinB: '#54d3c2',
+        accent: '#d66bff',
+        scale: 5.2,
+        rings: 5.5,
+        warp: 1.25,
+        turbulence: 0.75,
+        sharpness: 2.6,
+        contrast: 1.4,
+        angle: 0.45,
+        speed: 0.22,
       },
     },
-    {
-      effectId: 'text',
-      values: {
-        txt: 'BLAZE',
-        font: 'Zen Dots',
-        style: 'Fill',
-        fill: '#ffffff',
-        fill2: '#ff2d96',
-        grad: 0,
-        outCol: '#00d5ff',
-        size: 0.7,
-        posX: 0,
-        posY: 0.1,
-        rot: 0,
-        spin: 0,
-        wobble: 0,
-        wspeed: 2,
-        glitch: 0,
-        shadowX: 0.01,
-        shadowY: -0.02,
-        shadowCol: '#000000',
-      },
-    },
-    { effectId: 'dither', values: { pxSize: 3, levels: 8, spread: 1.94 } },
+    { effectId: 'chromab', values: { amount: 1, radial: 1 } },
+    { effectId: 'grain', values: { amount: 0.1, gsize: 1 } },
   ]
   return spec.map(({ effectId, values }) => {
     const l = makeLayer(effectId)

@@ -305,6 +305,42 @@ function XYPad({
   )
 }
 
+// Self-updating clock + scrubber, isolated so the per-frame time tick
+// re-renders only this component instead of the whole app.
+function TimelineClock({
+  timeRef,
+  onScrub,
+}: {
+  timeRef: { current: number }
+  onScrub: (t: number) => void
+}) {
+  const [time, setTime] = useState(timeRef.current)
+  useEffect(() => {
+    let raf = 0
+    const tick = () => {
+      // setState with an unchanged value bails out, so this is free while paused
+      setTime(timeRef.current)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [timeRef])
+  return (
+    <>
+      <span className="time">{time.toFixed(1)}s</span>
+      <input
+        className="scrubber"
+        type="range"
+        min={0}
+        max={60}
+        step={0.01}
+        value={time % 60}
+        onChange={(e) => onScrub(Number(e.target.value))}
+      />
+    </>
+  )
+}
+
 function FontPreviewSelect({
   value,
   options,
@@ -485,7 +521,6 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(INITIAL_LAYERS[0].uid)
   const [playing, setPlaying] = useState(true)
   const [speed, setSpeed] = useState(1)
-  const [time, setTime] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -515,6 +550,17 @@ export default function App() {
   playingRef.current = playing
   speedRef.current = speed
 
+  const saveTimer = useRef<number | undefined>(undefined)
+  const saveNow = useCallback(() => {
+    clearTimeout(saveTimer.current)
+    saveTimer.current = undefined
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, layers: layersRef.current }))
+    } catch {
+      // storage full or unavailable — skip autosave
+    }
+  }, [])
+
   const setLayers = useCallback((next: Layer[], structural = false) => {
     layersRef.current = next
     setLayersState(next)
@@ -522,12 +568,24 @@ export default function App() {
       rendererRef.current.rebuild(next)
       setError(rendererRef.current.error)
     }
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, layers: next }))
-    } catch {
-      // storage full or unavailable — skip autosave
+    // debounced autosave: slider drags fire dozens of updates per second,
+    // so batch the JSON.stringify + localStorage write
+    clearTimeout(saveTimer.current)
+    saveTimer.current = window.setTimeout(saveNow, 300)
+  }, [saveNow])
+
+  // flush a pending autosave when the tab is hidden or closed
+  useEffect(() => {
+    const flush = () => {
+      if (saveTimer.current !== undefined) saveNow()
     }
-  }, [])
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', flush)
+    }
+  }, [saveNow])
 
   useEffect(() => {
     const canvas = canvasRef.current!
@@ -543,7 +601,6 @@ export default function App() {
       last = now
       if (playingRef.current) {
         timeRef.current += dt * speedRef.current
-        setTime(timeRef.current)
       }
       r.render(layersRef.current, timeRef.current)
       raf = requestAnimationFrame(loop)
@@ -784,14 +841,23 @@ export default function App() {
       const start = timeRef.current
       const speed = speedRef.current
 
+      // Quantizing a fresh palette per frame bloats the file badly: identical
+      // colors land on different indices each frame, wrecking LZW compression.
+      // Refresh the palette once per second instead — colors stay faithful as
+      // the animation drifts, but indices are stable within each chunk.
+      const paletteRefresh = 2
+      let palette: number[][] = []
+
       for (let frame = 0; frame < frames; frame++) {
         const frameTime = start + (frame / GIF_EXPORT.fps) * speed
         renderer.renderFixed(layersRef.current, frameTime, width, height)
         renderer.finish()
         const rgba = readCanvasPixels(canvas, width, height, readCanvas, readCtx)
-        const palette = quantize(rgba, 256)
+        if (frame % paletteRefresh === 0) palette = quantize(rgba, 256)
         const index = applyPalette(rgba, palette)
         gif.writeFrame(index, width, height, {
+          // first frame's palette becomes the global color table; later frames
+          // carry it as a local table (768 bytes each — negligible)
           palette,
           delay,
           repeat: 0,
@@ -911,7 +977,6 @@ export default function App() {
 
   const scrub = (t: number) => {
     timeRef.current = t
-    setTime(t)
   }
 
   const sel = layers.find((l) => l.uid === selected) ?? null
@@ -1370,16 +1435,7 @@ export default function App() {
         <button className="play" onClick={() => setPlaying(!playing)}>
           {playing ? '⏸' : '▶'}
         </button>
-        <span className="time">{time.toFixed(1)}s</span>
-        <input
-          className="scrubber"
-          type="range"
-          min={0}
-          max={60}
-          step={0.01}
-          value={time % 60}
-          onChange={(e) => scrub(Number(e.target.value))}
-        />
+        <TimelineClock timeRef={timeRef} onScrub={scrub} />
         <span className="speed-label">Speed</span>
         <input
           type="range"

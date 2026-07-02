@@ -260,6 +260,124 @@ export const EFFECTS: EffectDef[] = [
     `,
   },
   {
+    id: 'metaballs',
+    name: 'Metaballs',
+    kind: 'generate',
+    params: [
+      c('colA', 'Background', '#05010f'),
+      c('colB', 'Blob', '#4dff9d'),
+      f('count', 'Count', 1, 8, 1, 4),
+      f('bsize', 'Size', 0.05, 0.5, 0.005, 0.16),
+      f('speed', 'Speed', 0, 3, 0.01, 0.5),
+      f('soft', 'Softness', 0.01, 1, 0.01, 0.15),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      vec2 q = uv - vec2(0.5 * asp2, 0.5);
+      float fsum = 0.0;
+      for (int i = 0; i < 8; i++) {
+        if (float(i) >= count) break;
+        float fi = float(i) + 1.0;
+        vec2 p = 0.34 * vec2(
+          sin(t * speed * (0.6 + fi * 0.31) + fi * 1.7),
+          cos(t * speed * (0.5 + fi * 0.23) + fi * 2.3)
+        );
+        vec2 d = q - p;
+        fsum += (bsize * bsize) / max(dot(d, d), 1e-5);
+      }
+      col = mix(colA, colB, smoothstep(1.0 - soft, 1.0 + soft, fsum));
+    `,
+  },
+  {
+    id: 'starfield',
+    name: 'Starfield',
+    kind: 'generate',
+    params: [
+      c('tint', 'Star Color', '#ffffff'),
+      c('colA', 'Sky', '#020210'),
+      f('density', 'Density', 4, 60, 1, 20),
+      f('speed', 'Drift', 0, 1, 0.01, 0.05),
+      f('twinkle', 'Twinkle', 0, 10, 0.1, 3),
+    ],
+    glsl: `
+      vec3 acc = colA;
+      for (int i = 0; i < 3; i++) {
+        float fi = float(i) + 1.0;
+        vec2 q = uv * density * (0.6 + fi * 0.4) + vec2(t * speed * fi, fi * 17.31);
+        vec2 idv = floor(q);
+        vec2 fv = fract(q);
+        vec2 sp = 0.15 + 0.7 * hash22(idv);
+        float b = hash21(idv + 3.1);
+        b *= 0.6 + 0.4 * sin(t * twinkle * (0.5 + b) + b * 40.0);
+        float star = smoothstep(0.12 * b, 0.0, length(fv - sp));
+        acc += star * b * tint / fi;
+      }
+      col = acc;
+    `,
+  },
+  {
+    id: 'caustics',
+    name: 'Caustics',
+    kind: 'generate',
+    params: [
+      c('colA', 'Deep', '#00263f'),
+      c('colB', 'Light', '#9fe8ff'),
+      f('scale', 'Scale', 0.5, 20, 0.1, 5),
+      f('speed', 'Speed', 0, 3, 0.01, 0.5),
+      f('intensity', 'Sharpness', 0.5, 8, 0.1, 3),
+    ],
+    glsl: `
+      vec2 q = uv * scale;
+      float v1 = 1.0 - abs(2.0 * vnoise(q + vec2(t * speed, t * speed * 0.6)) - 1.0);
+      float v2 = 1.0 - abs(2.0 * vnoise(q * 1.9 + vec2(-t * speed * 0.7, t * speed * 0.4) + 5.2) - 1.0);
+      float ca = pow(clamp(v1 * v2, 0.0, 1.0), intensity);
+      col = mix(colA, colB, ca);
+    `,
+  },
+  {
+    id: 'aurora',
+    name: 'Aurora',
+    kind: 'generate',
+    params: [
+      c('colA', 'Sky', '#02030f'),
+      c('colB', 'Band A', '#1fff8f'),
+      c('colC', 'Band B', '#7a2dff'),
+      f('speed', 'Speed', 0, 3, 0.01, 0.4),
+      f('intensity', 'Intensity', 0, 2, 0.01, 0.8),
+    ],
+    glsl: `
+      vec3 acc = colA;
+      for (int i = 0; i < 3; i++) {
+        float fi = float(i) + 1.0;
+        float w = fbm(vec2(uv.x * 1.5 + fi * 7.0, t * speed * 0.4 + fi * 3.3));
+        float band = exp(-abs(uv.y - (0.25 + 0.5 * w)) * (14.0 - fi * 3.0));
+        acc += mix(colB, colC, w) * band * intensity / fi;
+      }
+      col = acc;
+    `,
+  },
+  {
+    id: 'truchet',
+    name: 'Truchet',
+    kind: 'generate',
+    params: [
+      c('colA', 'Background', '#111116'),
+      c('colB', 'Line', '#ffd23d'),
+      f('scale', 'Scale', 2, 30, 0.5, 8),
+      f('width', 'Line Width', 0.02, 0.3, 0.005, 0.08),
+      f('rate', 'Flip Rate', 0, 4, 0.05, 0.5),
+    ],
+    glsl: `
+      vec2 q = uv * scale;
+      vec2 idv = floor(q);
+      vec2 fv = fract(q);
+      float flip = step(0.5, hash21(idv + floor(t * rate)));
+      fv.x = mix(fv.x, 1.0 - fv.x, flip);
+      float d = min(abs(length(fv) - 0.5), abs(length(fv - 1.0) - 0.5));
+      col = mix(colA, colB, smoothstep(width, width - 0.03, d));
+    `,
+  },
+  {
     id: 'warp',
     name: 'Noise Warp',
     kind: 'modify',

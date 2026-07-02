@@ -56,7 +56,7 @@ function randomValues(effectId: string): Layer['values'] {
   return values
 }
 
-// The default scene shown on first load (no saved project or share link).
+// The Cyberpunk scene shown on first load (no saved project or share link).
 function makeDefaultLayers(): Layer[] {
   const spec: Array<{ effectId: string; values: Layer['values'] }> = [
     { effectId: 'plasma', values: { scale: 8.5, speed: 0.56, shift: 0.95 } },

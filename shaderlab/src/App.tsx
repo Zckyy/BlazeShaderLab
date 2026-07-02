@@ -254,6 +254,57 @@ function NumberValueInput({
   )
 }
 
+function XYPad({
+  x,
+  y,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  x: number
+  y: number
+  min: number
+  max: number
+  step: number
+  onChange: (x: number, y: number) => void
+}) {
+  const padRef = useRef<HTMLDivElement>(null)
+  const norm = (v: number) => (v - min) / (max - min)
+  const fromPointer = (e: React.PointerEvent) => {
+    const r = padRef.current!.getBoundingClientRect()
+    const nx = clampNumber((e.clientX - r.left) / r.width, 0, 1)
+    const ny = clampNumber((e.clientY - r.top) / r.height, 0, 1)
+    // pad top = +y to match shader space (uv y points up)
+    onChange(
+      snapValue(min + nx * (max - min), min, step),
+      snapValue(min + (1 - ny) * (max - min), min, step)
+    )
+  }
+  return (
+    <div
+      ref={padRef}
+      className="xy-pad"
+      onPointerDown={(e) => {
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId)
+        } catch {
+          // synthetic events carry inactive pointer ids; drag still works via buttons check
+        }
+        fromPointer(e)
+      }}
+      onPointerMove={(e) => {
+        if (e.buttons & 1) fromPointer(e)
+      }}
+    >
+      <div
+        className="xy-pad-dot"
+        style={{ left: `${norm(x) * 100}%`, top: `${(1 - norm(y)) * 100}%` }}
+      />
+    </div>
+  )
+}
+
 function FontPreviewSelect({
   value,
   options,
@@ -532,7 +583,7 @@ export default function App() {
   }
 
   const randomizeLayers = () => {
-    const gens = EFFECTS.filter((e) => e.kind === 'generate')
+    const gens = EFFECTS.filter((e) => e.kind === 'generate' && e.id !== 'text')
     const mods = EFFECTS.filter((e) => e.kind === 'modify')
     const pick = (arr: typeof EFFECTS) => arr[Math.floor(Math.random() * arr.length)]
     const stack: Layer[] = [makeLayer(pick(gens).id)]
@@ -1206,6 +1257,37 @@ export default function App() {
                         onChange={(e) =>
                           updateLayer(sel.uid, {
                             values: { ...sel.values, [p.key]: e.target.value },
+                          })
+                        }
+                      />
+                    </label>
+                  )
+                }
+                if (p.xy === 'y') return null
+                if (p.xy === 'x') {
+                  const partnerKey = p.key.slice(0, -1) + 'y'
+                  const partner = selFx.params.find((q) => q.key === partnerKey)
+                  const pyDef = partner && typeof partner.def === 'number' ? partner.def : 0
+                  const px = typeof v === 'number' ? v : p.def
+                  const pyRaw = sel.values[partnerKey]
+                  const py = typeof pyRaw === 'number' ? pyRaw : pyDef
+                  return (
+                    <label key={p.key}>
+                      <span>
+                        {p.label}
+                        <em className="xy-value">
+                          {px.toFixed(2)}, {py.toFixed(2)}
+                        </em>
+                      </span>
+                      <XYPad
+                        x={px}
+                        y={py}
+                        min={p.min}
+                        max={p.max}
+                        step={p.step}
+                        onChange={(nx, ny) =>
+                          updateLayer(sel.uid, {
+                            values: { ...sel.values, [p.key]: nx, [partnerKey]: ny },
                           })
                         }
                       />

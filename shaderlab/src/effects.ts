@@ -5,14 +5,18 @@ import { FONTS, DEFAULT_FONT, TEXT_STYLES } from './fonts.ts'
 // arguments of the generated function, in declaration order.
 
 export type ParamDef =
-  | { key: string; label: string; type?: 'float'; min: number; max: number; step: number; def: number }
+  // xy pairs two float params (marked 'x' and 'y', keys differing only in the
+  // trailing letter) into a single 2D pad control in the UI
+  | { key: string; label: string; type?: 'float'; min: number; max: number; step: number; def: number; xy?: 'x' | 'y' }
   | { key: string; label: string; type: 'color'; def: string }
   | { key: string; label: string; type: 'text'; def: string }
-  | { key: string; label: string; type: 'select'; options: string[]; def: string }
+  | { key: string; label: string; type: 'select'; options: string[]; def: string; uniform?: boolean }
 
 // text/select params configure the layer's texture (CPU side) rather than
-// becoming shader uniforms
-export const isUniformParam = (p: ParamDef) => p.type !== 'text' && p.type !== 'select'
+// becoming shader uniforms — except select params marked `uniform: true`,
+// which reach the shader as a float holding the selected option's index
+export const isUniformParam = (p: ParamDef) =>
+  p.type !== 'text' && (p.type !== 'select' || p.uniform === true)
 
 export interface EffectDef {
   id: string
@@ -66,57 +70,177 @@ vec3 aces(vec3 x) {
 vec3 palette(float x, float shift) {
   return 0.5 + 0.5 * cos(6.28318 * (x + shift) + vec3(0.0, 2.094, 4.188));
 }
+vec2 hexCenterPointy(vec2 p, float s) {
+  float qf = (p.x * 0.57735026919 - p.y / 3.0) / s;
+  float rf = (p.y * 0.66666666667) / s;
+  float sf = -qf - rf;
+  float qr = floor(qf + 0.5);
+  float rr = floor(rf + 0.5);
+  float sr = floor(sf + 0.5);
+  float qd = abs(qr - qf);
+  float rd = abs(rr - rf);
+  float sd = abs(sr - sf);
+  if (qd > rd && qd > sd) {
+    qr = -rr - sr;
+  } else if (rd > sd) {
+    rr = -qr - sr;
+  }
+  return vec2((qr * 1.73205080757 + rr * 0.86602540378) * s, rr * 1.5 * s);
+}
+vec3 permute289(vec3 x) { return mod((x * 34.0 + 1.0) * x, 289.0); }
+float snoise2(vec2 v) {
+  const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+  vec2 i = floor(v + dot(v, C.yy));
+  vec2 x0 = v - i + dot(i, C.xx);
+  vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+  vec4 x12 = x0.xyxy + C.xxzz;
+  x12.xy -= i1;
+  i = mod(i, 289.0);
+  vec3 p = permute289(permute289(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+  vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+  m = m * m;
+  m = m * m;
+  vec3 x = 2.0 * fract(p * C.www) - 1.0;
+  vec3 h = abs(x) - 0.5;
+  vec3 ox = floor(x + 0.5);
+  vec3 a0 = x - ox;
+  m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+  vec3 g;
+  g.x = a0.x * x0.x + h.x * x0.y;
+  g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+  return 130.0 * dot(m, g);
+}
+float voro2(vec2 p) {
+  vec2 ip = floor(p);
+  vec2 fp = fract(p);
+  float md = 8.0;
+  for (int y = -1; y <= 1; y++)
+  for (int x = -1; x <= 1; x++) {
+    vec2 o = vec2(float(x), float(y));
+    vec2 r = o + hash22(ip + o) - fp;
+    md = min(md, dot(r, r));
+  }
+  return sqrt(md);
+}
+// signed noise in [-1, 1]; mode: 0 simplex, 1 value, 2 ridge, 3 turbulence, 4 voronoi
+float warpNoise(vec2 p, float mode) {
+  if (mode < 0.5) return snoise2(p);
+  if (mode < 1.5) return fbm(p) * 2.0 - 1.0;
+  if (mode < 2.5) return 1.0 - 2.0 * abs(fbm(p) * 2.0 - 1.0);
+  if (mode < 3.5) return abs(snoise2(p)) * 2.0 - 1.0;
+  return voro2(p) * 2.0 - 1.0;
+}
+vec3 tonemapReinhard(vec3 x) { return x / (1.0 + x); }
+vec3 uncharted2Curve(vec3 x) {
+  float A = 0.15; float B = 0.5; float C = 0.1; float D = 0.2; float E = 0.02; float F = 0.3;
+  return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+}
+vec3 tonemapFilmic(vec3 c) {
+  return clamp(uncharted2Curve(c * 2.0) / uncharted2Curve(vec3(11.2)), 0.0, 1.0);
+}
+vec3 tonemapCinematic(vec3 x) {
+  x = max(vec3(0.0), x - 0.004);
+  return (x * (6.2 * x + 0.5)) / (x * (6.2 * x + 1.7) + 0.06);
+}
+// mode: 0 aces, 1 reinhard, 2 filmic, 3 cinematic, 4 none
+vec3 applyTonemap(vec3 c, float mode) {
+  if (mode < 0.5) return aces(c);
+  if (mode < 1.5) return tonemapReinhard(c);
+  if (mode < 2.5) return tonemapFilmic(c);
+  if (mode < 3.5) return tonemapCinematic(c);
+  return clamp(c, 0.0, 1.0);
+}
 `
 
-const f = (key: string, label: string, min: number, max: number, step: number, def: number): ParamDef =>
-  ({ key, label, min, max, step, def })
+const f = (key: string, label: string, min: number, max: number, step: number, def: number) =>
+  ({ key, label, min, max, step, def }) satisfies ParamDef
 const c = (key: string, label: string, def: string): ParamDef => ({ key, label, type: 'color', def })
 
 export const EFFECTS: EffectDef[] = [
   {
     // Port of Shader Lab's GradientPass (basementstudio/shader-lab):
-    // colored points blended by inverse-pow-distance weight, noise domain warp,
-    // vortex rotation, animated point motion, ACES tonemap.
+    // 2-5 positionable weighted color points blended by inverse-pow-distance,
+    // iterated noise domain warp (selectable noise), vortex rotation, animated
+    // point motion, selectable tonemap, glow.
     id: 'meshgradient',
     name: 'Mesh Gradient',
     kind: 'generate',
     params: [
-      c('colA', 'Color 1', '#ff2d96'),
-      c('colB', 'Color 2', '#5c2dff'),
-      c('colC', 'Color 3', '#00d5ff'),
-      c('colD', 'Color 4', '#ff7a2d'),
+      f('points', 'Points', 2, 5, 1, 4),
+      c('col1', 'Color 1', '#ff2d96'),
+      { ...f('p1x', 'Point 1 Position', -1.2, 1.2, 0.01, -0.45), xy: 'x' as const },
+      { ...f('p1y', 'Point 1 Y', -1.2, 1.2, 0.01, 0.54), xy: 'y' as const },
+      f('w1', 'Weight 1', 0, 3, 0.01, 1),
+      c('col2', 'Color 2', '#5c2dff'),
+      { ...f('p2x', 'Point 2 Position', -1.2, 1.2, 0.01, -0.54), xy: 'x' as const },
+      { ...f('p2y', 'Point 2 Y', -1.2, 1.2, 0.01, -0.45), xy: 'y' as const },
+      f('w2', 'Weight 2', 0, 3, 0.01, 1),
+      c('col3', 'Color 3', '#00d5ff'),
+      { ...f('p3x', 'Point 3 Position', -1.2, 1.2, 0.01, 0.45), xy: 'x' as const },
+      { ...f('p3y', 'Point 3 Y', -1.2, 1.2, 0.01, -0.53), xy: 'y' as const },
+      f('w3', 'Weight 3', 0, 3, 0.01, 1),
+      c('col4', 'Color 4', '#ff7a2d'),
+      { ...f('p4x', 'Point 4 Position', -1.2, 1.2, 0.01, 0.54), xy: 'x' as const },
+      { ...f('p4y', 'Point 4 Y', -1.2, 1.2, 0.01, 0.45), xy: 'y' as const },
+      f('w4', 'Weight 4', 0, 3, 0.01, 1),
+      c('col5', 'Color 5', '#ffffff'),
+      { ...f('p5x', 'Point 5 Position', -1.2, 1.2, 0.01, 0), xy: 'x' as const },
+      { ...f('p5y', 'Point 5 Y', -1.2, 1.2, 0.01, 0), xy: 'y' as const },
+      f('w5', 'Weight 5', 0, 3, 0.01, 1),
       f('falloff', 'Falloff', 0.5, 4, 0.01, 1.85),
       f('speedM', 'Motion Speed', 0, 2, 0.01, 0.2),
       f('motion', 'Motion Amount', 0, 0.6, 0.01, 0.18),
+      { key: 'noiseType', label: 'Warp Noise', type: 'select', uniform: true,
+        options: ['Simplex', 'Value', 'Ridge', 'Turbulence', 'Voronoi'], def: 'Simplex' },
       f('warpAmt', 'Warp', 0, 0.6, 0.01, 0.18),
+      f('warpScale', 'Warp Scale', 0.1, 4, 0.01, 1.4),
+      f('warpIter', 'Warp Iterations', 1, 5, 1, 1),
+      f('warpDecay', 'Warp Decay', 0.1, 3, 0.01, 1),
+      f('warpBias', 'Warp Bias', 0, 1, 0.01, 0.5),
+      f('seed', 'Seed', 0, 100, 1, 0),
       f('vortex', 'Vortex', -1, 1, 0.01, 0.12),
+      { key: 'tonemap', label: 'Tonemap', type: 'select', uniform: true,
+        options: ['ACES', 'Reinhard', 'Filmic', 'Cinematic', 'None'], def: 'ACES' },
+      f('glowStr', 'Glow Strength', 0, 1, 0.01, 0.18),
+      f('glowThr', 'Glow Threshold', 0, 1, 0.01, 0.62),
     ],
     glsl: `
       float asp2 = u_res.x / u_res.y;
       vec2 q = (uv - vec2(0.5 * asp2, 0.5)) * 2.0;
       float mt = t * speedM;
-      q += warpAmt * 2.0 * vec2(
-        fbm(q * 1.4 + mt * 0.1) - 0.5,
-        fbm(q * 1.4 + 13.7 + mt * 0.1) - 0.5
-      );
+      for (int i = 1; i <= 5; i++) {
+        float fi = float(i);
+        if (fi > warpIter + 0.5) break;
+        float strength = warpAmt / pow(fi, warpDecay);
+        vec2 wp = q * warpScale + seed * 73.7;
+        float nx = warpNoise(wp + vec2(0.0, mt * 0.1 + fi * 100.0), noiseType);
+        float ny = warpNoise(wp + vec2(13.7, 7.1 + mt * 0.1 + fi * 200.0), noiseType);
+        q.x += strength * nx * warpBias * 2.0;
+        q.y += strength * ny * (1.0 - warpBias) * 2.0;
+      }
       float va = length(q) * vortex;
       q = mat2(cos(va), -sin(va), sin(va), cos(va)) * q;
-      vec3 pcols[4] = vec3[4](colA, colB, colC, colD);
+      vec3 pcols[5] = vec3[5](col1, col2, col3, col4, col5);
+      vec2 ppos[5] = vec2[5](vec2(p1x, p1y), vec2(p2x, p2y), vec2(p3x, p3y), vec2(p4x, p4y), vec2(p5x, p5y));
+      float pws[5] = float[5](w1, w2, w3, w4, w5);
       vec3 acc = vec3(0.0);
       float tw = 0.0;
-      for (int i = 0; i < 4; i++) {
+      for (int i = 0; i < 5; i++) {
         float fi = float(i + 1);
-        vec2 pp = 0.7 * vec2(cos(fi * 1.57 + 0.7), sin(fi * 1.57 + 0.7));
-        pp += motion * vec2(
+        float act = step(fi, points + 0.5);
+        vec2 pp = ppos[i] + motion * vec2(
           sin(mt * fi * 0.73 + fi),
           cos(mt * fi * 0.41 + fi * 1.7)
         );
         float d = max(length(q - pp), 0.01);
-        float w = 1.0 / pow(d, falloff);
+        float w = pws[i] * act / pow(d, falloff);
         acc += pcols[i] * w;
         tw += w;
       }
-      col = aces(acc / max(tw, 1e-4));
+      col = applyTonemap(acc / max(tw, 1e-4), tonemap);
+      float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col += smoothstep(glowThr, 1.0, luma) * glowStr;
+      col = clamp(col, 0.0, 1.0);
     `,
   },
   {
@@ -496,6 +620,93 @@ export const EFFECTS: EffectDef[] = [
       float flatX = (floor(fx2) + 0.5) / ribs;
       uv.x = mix(uv.x, flatX, refraction);
       uv.y += sin(ph * 3.14159) * curve;
+    `,
+  },
+  {
+    // Adapted from Basement Studio Shader Lab's VoxelPass:
+    // fake isometric hex blocks with face shading, outlines, height, and lego caps.
+    id: 'voxel',
+    name: 'Voxel',
+    kind: 'modify',
+    params: [
+      f('cellSize', 'Cell Size', 4, 96, 1, 24),
+      f('depth', 'Depth', 0, 1, 0.01, 0.6),
+      f('maxHeight', 'Max Height', 1, 8, 1, 6),
+      f('topShade', 'Top Shade', 0, 1.5, 0.01, 1),
+      f('lightShade', 'Light Side', 0, 1.5, 0.01, 0.78),
+      f('darkShade', 'Dark Side', 0, 1.5, 0.01, 0.55),
+      f('flipLight', 'Flip Light', 0, 1, 1, 0),
+      f('lego', 'Lego Caps', 0, 1, 1, 0),
+      f('outlineWidth', 'Outline', 0, 4, 0.1, 1),
+      c('outlineColor', 'Outline Color', '#0a0a0a'),
+    ],
+    glsl: `
+      const float SQRT3 = 1.73205080757;
+      const int STACK_LIMIT = 8;
+      vec2 pix = gl_FragCoord.xy;
+      float s = max(cellSize, 4.0);
+      float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      float height = mix(1.0, 1.0 + luma * (clamp(maxHeight, 1.0, 8.0) - 1.0), depth);
+
+      float bestFound = 0.0;
+      float bestJ = 0.0;
+      vec2 bestCenter = vec2(0.0);
+      for (int k = STACK_LIMIT - 1; k >= 0; k--) {
+        float j = float(k);
+        vec2 probe = vec2(pix.x, pix.y + j * s);
+        vec2 center = hexCenterPointy(probe, s);
+        float cubeExists = step(j + 0.001, height);
+        float take = cubeExists * (1.0 - bestFound);
+        bestFound = max(bestFound, take);
+        bestJ = mix(bestJ, j, take);
+        bestCenter = mix(bestCenter, center, take);
+      }
+
+      vec2 cubeCenter = vec2(bestCenter.x, bestCenter.y - bestJ * s);
+      vec2 localP = pix - cubeCenter;
+      float lx = localP.x;
+      float ly = localP.y;
+
+      float topThreshold = -abs(lx) / SQRT3;
+      float isTop = step(ly, topThreshold);
+      float isRight = (1.0 - isTop) * step(0.0, lx);
+      float flip = step(0.5, flipLight);
+      float sideBright = mix(lightShade, darkShade, flip);
+      float sideDark = mix(darkShade, lightShade, flip);
+      float cubeFaceShade = mix(mix(sideDark, sideBright, isRight), topShade, isTop);
+
+      float legoOn = step(0.5, lego);
+      float notchH = s * 0.18;
+      float notchRx = s * 0.4;
+      float notchRy = s * 0.2;
+      float notchBaseY = s * -0.5;
+      float notchTopY = notchBaseY - notchH;
+      float capDx = lx;
+      float capDy = ly - notchTopY;
+      float capR = (capDx / notchRx) * (capDx / notchRx) + (capDy / notchRy) * (capDy / notchRy);
+      float inCap = 1.0 - step(1.0, capR);
+      float tNorm = clamp(1.0 - (lx / notchRx) * (lx / notchRx), 0.0, 1.0);
+      float arc = sqrt(tNorm) * notchRy;
+      float yTopArc = notchTopY + arc;
+      float yBaseArc = notchBaseY + arc;
+      float inSideBand = (1.0 - step(notchRx, abs(lx)))
+        * step(yTopArc, ly)
+        * (1.0 - step(yBaseArc, ly));
+      float inNotch = legoOn * isTop * max(inCap, inSideBand);
+      float notchCapShade = topShade * 0.92;
+      float sideT = clamp(lx / notchRx * 0.5 + 0.5, 0.0, 1.0);
+      float notchSideShade = mix(sideDark, sideBright, sideT);
+      float notchFaceShade = mix(notchSideShade, notchCapShade, inCap);
+      float faceShade = mix(cubeFaceShade, notchFaceShade, inNotch);
+
+      vec3 litColor = col * faceShade;
+      float inradius = s * SQRT3 * 0.5;
+      float proj1 = abs(lx);
+      float proj2 = abs(lx * 0.5 + ly * SQRT3 * 0.5);
+      float proj3 = abs(lx * 0.5 - ly * SQRT3 * 0.5);
+      float dEdge = inradius - max(max(proj1, proj2), proj3);
+      float outlineMask = 1.0 - smoothstep(0.0, max(outlineWidth, 0.0001), dEdge);
+      col = mix(litColor, outlineColor, outlineMask);
     `,
   },
   {

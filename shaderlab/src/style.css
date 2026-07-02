@@ -303,6 +303,47 @@ button:disabled:hover { color: #333; border-color: var(--border); background: tr
   margin: 0;
 }
 
+.xy-value {
+  font-style: normal;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.xy-pad {
+  position: relative;
+  height: 130px;
+  background: #070707;
+  border: 1px solid var(--border);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 20% 20%;
+  background-position: -1px -1px;
+}
+.xy-pad::before,
+.xy-pad::after {
+  content: '';
+  position: absolute;
+  background: #2e2e2e;
+  pointer-events: none;
+}
+.xy-pad::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+.xy-pad::after { top: 50%; left: 0; right: 0; height: 1px; }
+.xy-pad-dot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.12), 0 2px 6px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.xy-pad:hover .xy-pad-dot,
+.xy-pad:active .xy-pad-dot { background: var(--accent); }
+
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;

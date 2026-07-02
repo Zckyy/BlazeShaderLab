@@ -159,6 +159,18 @@ export default function App() {
   const [addOpen, setAddOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [shared, setShared] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const exportRef = useRef<HTMLDivElement>(null)
+
+  // close the export menu when clicking anywhere outside it
+  useEffect(() => {
+    if (!exportOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!exportRef.current?.contains(e.target as Node)) setExportOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [exportOpen])
   const [aspect, setAspect] = useState<'fill' | '1:1' | '16:9' | '9:16'>('fill')
   const dragUid = useRef<string | null>(null)
   const [draggingUid, setDraggingUid] = useState<string | null>(null)
@@ -417,17 +429,35 @@ export default function App() {
             value=""
             onChange={(e) => { if (e.target.value) loadPreset(e.target.value) }}
           >
-            <option value="">✦ Presets…</option>
+            <option value="">Presets</option>
             {PRESETS.map((p) => (
               <option key={p.name} value={p.name}>{p.name}</option>
             ))}
           </select>
-          <button onClick={randomize}>🎲 Randomize</button>
-          <button onClick={snapshot}>📸 PNG</button>
-          <button onClick={share}>{shared ? '✓ Link copied!' : '🔗 Share'}</button>
-          <button onClick={exportGLSL}>{copied ? '✓ Copied!' : '⤓ Export GLSL'}</button>
-          <button onClick={exportProject}>💾 Save Project</button>
-          <button onClick={() => fileInputRef.current?.click()}>📂 Load Project</button>
+          <button onClick={randomize}>Randomize</button>
+          <button onClick={share}>{shared ? 'Link copied' : 'Share'}</button>
+          <div className="export-menu-wrap" ref={exportRef}>
+            <button
+              className={exportOpen ? 'open' : ''}
+              onClick={() => setExportOpen(!exportOpen)}
+            >
+              {copied ? 'Copied' : 'Export ▾'}
+            </button>
+            {exportOpen && (
+              <div className="export-menu">
+                <button onClick={() => { snapshot(); setExportOpen(false) }}>
+                  PNG <em>image</em>
+                </button>
+                <button onClick={() => { exportGLSL(); setExportOpen(false) }}>
+                  GLSL <em>clipboard</em>
+                </button>
+                <button onClick={() => { exportProject(); setExportOpen(false) }}>
+                  Project <em>json</em>
+                </button>
+              </div>
+            )}
+          </div>
+          <button onClick={() => fileInputRef.current?.click()}>Load</button>
           <input
             ref={fileInputRef}
             type="file"
@@ -448,7 +478,7 @@ export default function App() {
             <span>Layers</span>
             <span className="head-btns">
               <button className="add-btn" onClick={randomizeLayers} title="Random layer stack">
-                🎲
+                RND
               </button>
               <button className="add-btn" onClick={() => setAddOpen(!addOpen)}>
                 + Add

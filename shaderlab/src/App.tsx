@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
+import { GIFEncoder, applyPalette, quantize } from 'gifenc'
 import { EFFECTS, EFFECT_MAP } from './effects.ts'
 import { Renderer, buildFragmentShader } from './renderer.ts'
 import { PRESETS } from './presets.ts'
@@ -77,6 +78,20 @@ const PNG_EXPORT_SIZES = [
   { label: '1440p', width: 2560, height: 1440 },
   { label: '4K', width: 3840, height: 2160 },
 ]
+const GIF_EXPORT_SIZES = [
+  { label: '720p', width: 1280, height: 720 },
+  { label: '1080p', width: 1920, height: 1080 },
+]
+const MP4_EXPORT_SIZES = [
+  { label: '1080p', width: 1920, height: 1080 },
+  { label: '4K', width: 3840, height: 2160 },
+]
+const DISCORD_EXPORTS = [
+  { label: 'PFP', width: 512, height: 512, filename: 'discord-pfp' },
+  { label: 'Banner', width: 680, height: 240, filename: 'discord-banner' },
+]
+const GIF_EXPORT = { duration: 4, fps: 25 }
+const MP4_EXPORT = { duration: 4, fps: 30 }
 
 // Rebuilds layers from untrusted/saved JSON: unknown effects are dropped,
 // missing params get defaults, uids are regenerated.
@@ -175,6 +190,7 @@ export default function App() {
   const [copied, setCopied] = useState(false)
   const [shared, setShared] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [exporting, setExporting] = useState<string | null>(null)
   const exportRef = useRef<HTMLDivElement>(null)
 
   // close the export menu when clicking anywhere outside it
@@ -397,19 +413,149 @@ export default function App() {
     URL.revokeObjectURL(a.href)
   }
 
-  const exportPNG = (width: number, height: number) => {
+  const makeExportRenderer = () => {
     const canvas = document.createElement('canvas')
     const renderer = new Renderer(canvas)
     renderer.rebuild(layersRef.current)
     if (renderer.error) {
       setError(renderer.error)
-      return
+      return null
     }
+    return { canvas, renderer }
+  }
+
+  const exportPNG = (width: number, height: number, filename = `shaderlab-${width}x${height}`) => {
+    const exportTarget = makeExportRenderer()
+    if (!exportTarget) return
+    const { canvas, renderer } = exportTarget
     renderer.renderFixed(layersRef.current, timeRef.current, width, height)
     canvas.toBlob((blob) => {
       if (!blob) return
-      downloadBlob(blob, `shaderlab-${width}x${height}.png`)
+      downloadBlob(blob, `${filename}.png`)
     }, 'image/png')
+  }
+
+  const waitForPaint = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+
+  const readCanvasPixels = (
+    source: HTMLCanvasElement,
+    width: number,
+    height: number,
+    target: HTMLCanvasElement,
+    ctx: CanvasRenderingContext2D
+  ) => {
+    target.width = width
+    target.height = height
+    ctx.clearRect(0, 0, width, height)
+    ctx.drawImage(source, 0, 0, width, height)
+    return ctx.getImageData(0, 0, width, height).data
+  }
+
+  const exportGIF = async (
+    width: number,
+    height: number,
+    filename = `shaderlab-${width}x${height}`
+  ) => {
+    const name = `GIF ${width}x${height}`
+    const exportTarget = makeExportRenderer()
+    if (!exportTarget) return
+    setExporting(name)
+    try {
+      const { canvas, renderer } = exportTarget
+      const readCanvas = document.createElement('canvas')
+      const readCtx = readCanvas.getContext('2d', { willReadFrequently: true })
+      if (!readCtx) throw new Error('Could not create GIF readback canvas')
+
+      const gif = GIFEncoder()
+      const frames = GIF_EXPORT.duration * GIF_EXPORT.fps
+      const delay = 1000 / GIF_EXPORT.fps
+      const start = timeRef.current
+      const speed = speedRef.current
+
+      for (let frame = 0; frame < frames; frame++) {
+        const frameTime = start + (frame / GIF_EXPORT.fps) * speed
+        renderer.renderFixed(layersRef.current, frameTime, width, height)
+        renderer.finish()
+        const rgba = readCanvasPixels(canvas, width, height, readCanvas, readCtx)
+        const palette = quantize(rgba, 256)
+        const index = applyPalette(rgba, palette)
+        gif.writeFrame(index, width, height, {
+          palette,
+          delay,
+          repeat: 0,
+        })
+        if (frame % 4 === 3) await waitForPaint()
+      }
+
+      gif.finish()
+      const gifBytes = gif.bytes()
+      const gifBuffer = new Uint8Array(gifBytes.length)
+      gifBuffer.set(gifBytes)
+      downloadBlob(new Blob([gifBuffer.buffer], { type: 'image/gif' }), `${filename}.gif`)
+    } catch (e) {
+      setError(`GIF export failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  const getMp4MimeType = () =>
+    [
+      'video/mp4;codecs="avc1.42E01E"',
+      'video/mp4;codecs="avc1.640028"',
+      'video/mp4',
+    ].find((type) => MediaRecorder.isTypeSupported(type)) ?? null
+
+  const exportMP4 = async (width: number, height: number) => {
+    const name = `MP4 ${width}x${height}`
+    const mimeType = getMp4MimeType()
+    if (!mimeType) {
+      setError('MP4 export is not supported by this browser.')
+      return
+    }
+
+    const exportTarget = makeExportRenderer()
+    if (!exportTarget) return
+    setExporting(name)
+    try {
+      const { canvas, renderer } = exportTarget
+      const stream = canvas.captureStream(MP4_EXPORT.fps)
+      const chunks: BlobPart[] = []
+      const recorder = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: width >= 3840 ? 24_000_000 : 10_000_000,
+      })
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data)
+      }
+
+      const stopped = new Promise<void>((resolve, reject) => {
+        recorder.onstop = () => resolve()
+        recorder.onerror = () => reject(new Error('MP4 recorder failed'))
+      })
+      recorder.start()
+
+      const frames = MP4_EXPORT.duration * MP4_EXPORT.fps
+      const frameMs = 1000 / MP4_EXPORT.fps
+      const start = timeRef.current
+      const speed = speedRef.current
+
+      for (let frame = 0; frame < frames; frame++) {
+        const frameTime = start + (frame / MP4_EXPORT.fps) * speed
+        renderer.renderFixed(layersRef.current, frameTime, width, height)
+        renderer.finish()
+        await new Promise<void>((resolve) => setTimeout(resolve, frameMs))
+      }
+
+      recorder.stop()
+      stream.getTracks().forEach((track) => track.stop())
+      await stopped
+      downloadBlob(new Blob(chunks, { type: mimeType }), `shaderlab-${width}x${height}.mp4`)
+    } catch (e) {
+      setError(`MP4 export failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setExporting(null)
+    }
   }
 
   const share = async () => {
@@ -491,6 +637,7 @@ export default function App() {
                 {PNG_EXPORT_SIZES.map((size) => (
                   <button
                     key={size.label}
+                    disabled={exporting !== null}
                     onClick={() => {
                       exportPNG(size.width, size.height)
                       setExportOpen(false)
@@ -499,11 +646,60 @@ export default function App() {
                     {size.label} <em>{size.width}×{size.height}</em>
                   </button>
                 ))}
+                <div className="export-menu-label">Discord <em>PNG / GIF</em></div>
+                {DISCORD_EXPORTS.map((size) => (
+                  <div className="export-menu-split" key={size.label}>
+                    <button
+                      disabled={exporting !== null}
+                      onClick={() => {
+                        exportPNG(size.width, size.height, `${size.filename}-${size.width}x${size.height}`)
+                        setExportOpen(false)
+                      }}
+                    >
+                      {size.label} PNG <em>{size.width}×{size.height}</em>
+                    </button>
+                    <button
+                      disabled={exporting !== null}
+                      onClick={() => {
+                        void exportGIF(size.width, size.height, `${size.filename}-${size.width}x${size.height}`)
+                        setExportOpen(false)
+                      }}
+                    >
+                      GIF
+                    </button>
+                  </div>
+                ))}
+                <div className="export-menu-label">GIF <em>4s / 25fps</em></div>
+                {GIF_EXPORT_SIZES.map((size) => (
+                  <button
+                    key={size.label}
+                    disabled={exporting !== null}
+                    onClick={() => {
+                      void exportGIF(size.width, size.height)
+                      setExportOpen(false)
+                    }}
+                  >
+                    {size.label} <em>{size.width}×{size.height}</em>
+                  </button>
+                ))}
+                <div className="export-menu-label">MP4 <em>4s / 30fps</em></div>
+                {MP4_EXPORT_SIZES.map((size) => (
+                  <button
+                    key={size.label}
+                    disabled={exporting !== null}
+                    onClick={() => {
+                      void exportMP4(size.width, size.height)
+                      setExportOpen(false)
+                    }}
+                  >
+                    {size.label} <em>{size.width}×{size.height}</em>
+                  </button>
+                ))}
                 <div className="export-menu-label">Source</div>
-                <button onClick={() => { exportGLSL(); setExportOpen(false) }}>
+                <button disabled={exporting !== null} onClick={() => { exportGLSL(); setExportOpen(false) }}>
                   GLSL <em>clipboard</em>
                 </button>
-                <button onClick={() => { exportProject(); setExportOpen(false) }}>
+                <button disabled={exporting !== null} onClick={() => { exportProject(); setExportOpen(false) }}>
                   Project <em>json</em>
                 </button>
               </div>
@@ -664,6 +860,7 @@ export default function App() {
             </svg>
           </button>
           {error && <pre className="shader-error">{error}</pre>}
+          {exporting && <div className="export-status">Exporting {exporting}...</div>}
         </section>
 
         <aside className="panel props-panel">

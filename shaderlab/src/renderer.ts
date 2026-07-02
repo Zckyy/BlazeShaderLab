@@ -178,4 +178,8 @@ export class Renderer {
     }
     this.draw(layers, time, width, height)
   }
+
+  finish() {
+    this.gl.finish()
+  }
 }

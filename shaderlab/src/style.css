@@ -64,6 +64,12 @@ button {
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
 button:hover { color: var(--text); border-color: var(--muted); }
+button:disabled {
+  color: #333;
+  border-color: var(--border);
+  cursor: wait;
+}
+button:disabled:hover { color: #333; border-color: var(--border); background: transparent; }
 
 .export-menu-wrap { position: relative; }
 .export-menu-wrap button.open { color: var(--text); border-color: var(--muted); }
@@ -87,13 +93,32 @@ button:hover { color: var(--text); border-color: var(--muted); }
   font-style: normal; font-size: 9px; color: var(--muted);
   letter-spacing: 0.5px;
 }
+.export-menu-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  border-bottom: 1px solid var(--border);
+}
+.export-menu-split button {
+  border-bottom: none;
+}
+.export-menu-split button + button {
+  justify-content: center;
+  border-left: 1px solid var(--border);
+}
 .export-menu-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   padding: 6px 10px 4px;
   color: var(--accent);
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 1px;
   border-bottom: 1px solid var(--border);
+}
+.export-menu-label em {
+  color: var(--muted);
+  letter-spacing: 0.5px;
 }
 
 .main { display: flex; flex: 1; min-height: 0; }
@@ -228,6 +253,17 @@ button:hover { color: var(--text); border-color: var(--muted); }
   padding: 10px;
   font-family: var(--mono);
   font-size: 11px; white-space: pre-wrap;
+}
+.export-status {
+  position: absolute; bottom: 10px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 10, 10, 0.92);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  padding: 8px 12px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
 .props { padding: 12px; display: flex; flex-direction: column; gap: 14px; }

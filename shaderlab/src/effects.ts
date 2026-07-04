@@ -10,13 +10,16 @@ export type ParamDef =
   | { key: string; label: string; type?: 'float'; min: number; max: number; step: number; def: number; xy?: 'x' | 'y' }
   | { key: string; label: string; type: 'color'; def: string }
   | { key: string; label: string; type: 'text'; def: string }
+  // image params hold a data URL uploaded by the user; they feed the layer's
+  // texture (CPU side) like text params
+  | { key: string; label: string; type: 'image'; def: string }
   | { key: string; label: string; type: 'select'; options: string[]; def: string; uniform?: boolean }
 
 // text/select params configure the layer's texture (CPU side) rather than
 // becoming shader uniforms — except select params marked `uniform: true`,
 // which reach the shader as a float holding the selected option's index
 export const isUniformParam = (p: ParamDef) =>
-  p.type !== 'text' && (p.type !== 'select' || p.uniform === true)
+  p.type !== 'text' && p.type !== 'image' && (p.type !== 'select' || p.uniform === true)
 
 export interface EffectDef {
   id: string
@@ -804,6 +807,49 @@ export const EFFECTS: EffectDef[] = [
       vec3 fcol = mix(fill, fill2, grad * (1.0 - tuv.y));
       col = mix(col, fcol, tx.r);
       col = mix(col, outCol, tx.g);
+    `,
+  },
+  {
+    id: 'image',
+    name: 'Image',
+    kind: 'generate',
+    texture: true,
+    params: [
+      { key: 'src', label: 'Image', type: 'image', def: '' },
+      { key: 'fit', label: 'Fit', type: 'select', uniform: true,
+        options: ['Cover', 'Contain', 'Manual'], def: 'Cover' },
+      f('size', 'Size', 0.05, 3, 0.01, 0.8),
+      { ...f('posX', 'Position', -1, 1, 0.01, 0), xy: 'x' as const },
+      { ...f('posY', 'Position Y', -1, 1, 0.01, 0), xy: 'y' as const },
+      f('rot', 'Rotate', -3.14, 3.14, 0.01, 0),
+      f('spin', 'Spin', -3, 3, 0.01, 0),
+      f('alpha', 'Image Alpha', 0, 1, 0.01, 1),
+      c('tint', 'Tint', '#ffffff'),
+      f('tintAmt', 'Tint Amount', 0, 1, 0.01, 0),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      vec2 p = uv - vec2(0.5 * asp2 + posX * 0.5 * asp2, 0.5 + posY * 0.5);
+      float ang = rot + t * spin;
+      float ca = cos(ang);
+      float sa = sin(ang);
+      p = mat2(ca, -sa, sa, ca) * p;
+      float ta = max(texAspect, 0.001);
+      // image height in uv units (canvas height = 1); width = height * ta
+      float ih;
+      if (fit < 0.5) {
+        ih = max(1.0, asp2 / ta);
+      } else if (fit < 1.5) {
+        ih = min(1.0, asp2 / ta);
+      } else {
+        ih = max(size, 0.001);
+      }
+      vec2 tuv = p / vec2(ih * ta, ih) + 0.5;
+      tuv.y = 1.0 - tuv.y;
+      float inT = step(0.0, tuv.x) * step(tuv.x, 1.0) * step(0.0, tuv.y) * step(tuv.y, 1.0);
+      vec4 tx = texture(tex, clamp(tuv, 0.0, 1.0));
+      vec3 icol = mix(tx.rgb, tx.rgb * tint, tintAmt);
+      col = mix(col, icol, tx.a * inT * alpha);
     `,
   },
   {

@@ -54,7 +54,7 @@ function makeLayer(effectId: string): Layer {
   }
 }
 
-function randomValues(effectId: string): Layer['values'] {
+function randomValues(effectId: string, current?: Layer['values']): Layer['values'] {
   const fx = EFFECT_MAP.get(effectId)!
   const values: Layer['values'] = {}
   for (const p of fx.params) {
@@ -63,6 +63,9 @@ function randomValues(effectId: string): Layer['values'] {
         '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0')
     } else if (p.type === 'text') {
       values[p.key] = p.def
+    } else if (p.type === 'image') {
+      // the uploaded image is user content, not a randomizable parameter
+      values[p.key] = current?.[p.key] ?? p.def
     } else if (p.type === 'select') {
       values[p.key] = p.options[Math.floor(Math.random() * p.options.length)]
     } else {
@@ -413,6 +416,8 @@ function sanitizeLayers(raw: unknown): Layer[] | null {
           base.values[p.key] = v
         } else if (p.type === 'text' && typeof v === 'string') {
           base.values[p.key] = v.slice(0, 200)
+        } else if (p.type === 'image' && typeof v === 'string' && (v === '' || v.startsWith('data:image/'))) {
+          base.values[p.key] = v
         } else if (p.type === 'select' && typeof v === 'string' && p.options.includes(v)) {
           base.values[p.key] = v
         } else if ((p.type === undefined || p.type === 'float') && typeof v === 'number' && isFinite(v)) {
@@ -431,7 +436,13 @@ function sanitizeLayers(raw: unknown): Layer[] | null {
 
 function encodeShare(layers: Layer[]): string {
   const json = JSON.stringify({ version: 1, layers })
-  return btoa(String.fromCharCode(...new TextEncoder().encode(json)))
+  const bytes = new TextEncoder().encode(json)
+  // chunked to avoid blowing the argument limit on large payloads (e.g. image data URLs)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  }
+  return btoa(bin)
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '')
@@ -612,7 +623,7 @@ export default function App() {
   }
 
   const randomizeLayers = () => {
-    const gens = EFFECTS.filter((e) => e.kind === 'generate' && e.id !== 'text')
+    const gens = EFFECTS.filter((e) => e.kind === 'generate' && e.id !== 'text' && e.id !== 'image')
     const mods = EFFECTS.filter((e) => e.kind === 'modify')
     const pick = (arr: typeof EFFECTS) => arr[Math.floor(Math.random() * arr.length)]
     const stack: Layer[] = [makeLayer(pick(gens).id)]
@@ -638,7 +649,7 @@ export default function App() {
   const randomize = () => {
     setLayers(
       layersRef.current.map((l) =>
-        l.locked ? l : { ...l, values: randomValues(l.effectId) }
+        l.locked ? l : { ...l, values: randomValues(l.effectId, l.values) }
       )
     )
   }
@@ -1294,6 +1305,38 @@ export default function App() {
             <div className="props">
               {selFx.params.map((p) => {
                 const v = sel.values[p.key]
+                if (p.type === 'image') {
+                  const src = typeof v === 'string' ? v : ''
+                  const setSrc = (value: string) =>
+                    updateLayer(sel.uid, {
+                      values: { ...sel.values, [p.key]: value },
+                    })
+                  return (
+                    <label key={p.key} className="image-row">
+                      <span>{p.label}</span>
+                      <div className="image-input">
+                        {src && <img className="image-thumb" src={src} alt="" />}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            e.target.value = ''
+                            if (!file) return
+                            const reader = new FileReader()
+                            reader.onload = () => setSrc(String(reader.result ?? ''))
+                            reader.readAsDataURL(file)
+                          }}
+                        />
+                        {src && (
+                          <button type="button" onClick={() => setSrc('')}>
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </label>
+                  )
+                }
                 if (p.type === 'text') {
                   return (
                     <label key={p.key}>

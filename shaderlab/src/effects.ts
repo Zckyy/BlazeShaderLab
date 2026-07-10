@@ -166,6 +166,33 @@ float paperShape(vec2 p, float shape, float t) {
   }
   return smoothstep(0.10, 0.18, field);
 }
+// ACES transform and irrational-domain field used by shadcn.io's
+// Raymarching shader. Names are scoped to avoid colliding with app helpers.
+vec3 raymarchAces(vec3 color) {
+  const mat3 m1 = mat3(
+    0.59719, 0.07600, 0.02840,
+    0.35458, 0.90834, 0.13383,
+    0.04823, 0.01566, 0.83777
+  );
+  const mat3 m2 = mat3(
+     1.60475, -0.10208, -0.00327,
+    -0.53108,  1.10813, -0.07276,
+    -0.07367, -0.00605,  1.07602
+  );
+  vec3 v = m1 * color;
+  vec3 a = v * (v + 0.0245786) - 0.000090537;
+  vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+  return m2 * (a / b);
+}
+float raymarchDotNoise(vec3 p) {
+  const float phi = 1.618033988;
+  const mat3 gold = mat3(
+    -0.571464913,  0.814921382, 0.096597072,
+    -0.278044873, -0.303026659, 0.911518454,
+     0.772087367,  0.494042493, 0.399753815
+  );
+  return dot(cos(gold * p), sin(phi * p * gold));
+}
 vec3 tonemapReinhard(vec3 x) { return x / (1.0 + x); }
 vec3 uncharted2Curve(vec3 x) {
   float A = 0.15; float B = 0.5; float C = 0.1; float D = 0.2; float E = 0.02; float F = 0.3;
@@ -1200,6 +1227,48 @@ export const EFFECTS: EffectDef[] = [
       glassCol -= reflection * rim * max(-facing, 0.0) * vec3(0.16);
       glassCol += reflection * fresnel * mask * vec3(0.12);
       col = clamp(glassCol, 0.0, 1.0);
+    `,
+  },
+  {
+    // Port of shadcn.io's Raymarching shader: a volumetric irrational-noise
+    // field with a moving light orb and ACES filmic tonemapping.
+    id: 'raymarching',
+    name: 'Raymarching',
+    kind: 'generate',
+    params: [
+      f('speed', 'Speed', -3, 3, 0.01, 1),
+      f('intensity', 'Intensity', 0.05, 3, 0.01, 1),
+      f('complexity', 'Complexity', 0.1, 1, 0.01, 1),
+      f('colorShift', 'Color Shift', 0, 3, 0.01, 1),
+    ],
+    glsl: `
+      float rt = -t * speed - 500.0;
+      vec2 ndc = gl_FragCoord.xy / u_res * 2.0 - 1.0;
+      ndc.x *= u_res.x / u_res.y;
+      vec3 rd = normalize(vec3(2.0 * gl_FragCoord.xy, 0.0) - u_res.xyy);
+      vec3 pos = vec3(0.0, 0.0, rt);
+      vec3 light = vec3(0.0);
+
+      for (int i = 0; i < 150; i++) {
+        if (float(i) >= 150.0 * complexity) break;
+        vec3 samplePos = pos;
+        pos.xy = rot2d(pos.xy, pos.z * 0.0001);
+        float stepLen = abs(raymarchDotNoise(samplePos) + pos.y) * 0.1 + 0.015;
+        pos += rd * stepLen;
+
+        light += sin(pos.z * 0.5 - vec3(0.5, 0.8, 0.9) * colorShift)
+          / (abs(stepLen * 0.001) + 0.000001);
+        vec2 orb = vec2(
+          -1.0 + 2.0 * smoothstep(-1.0, 1.0, sin(rt * 0.5)),
+          -0.4 + sin(rt * 0.25) * 0.3
+        );
+        float orbDenom = length(ndc + orb)
+          * (0.001 * abs(sin(rt * 0.4) * 0.5 + 2.0));
+        light += 0.3 * vec3(7.0, 4.0, 1.0) / max(orbDenom, 0.000001);
+      }
+
+      vec3 mapped = raymarchAces(light * light * intensity / 3.0e12);
+      col = pow(max(mapped, vec3(0.0)), vec3(1.0 / 2.2));
     `,
   },
   {

@@ -141,6 +141,9 @@ float warpNoise(vec2 p, float mode) {
   if (mode < 3.5) return abs(snoise2(p)) * 2.0 - 1.0;
   return voro2(p) * 2.0 - 1.0;
 }
+vec2 rot2d(vec2 v, float th) {
+  return mat2(cos(th), sin(th), -sin(th), cos(th)) * v;
+}
 vec3 tonemapReinhard(vec3 x) { return x / (1.0 + x); }
 vec3 uncharted2Curve(vec3 x) {
   float A = 0.15; float B = 0.5; float C = 0.1; float D = 0.2; float E = 0.02; float F = 0.3;
@@ -760,6 +763,180 @@ export const EFFECTS: EffectDef[] = [
       fv.x = mix(fv.x, 1.0 - fv.x, flip);
       float d = min(abs(length(fv) - 0.5), abs(length(fv - 1.0) - 0.5));
       col = mix(colA, colB, smoothstep(width, width - 0.03, d));
+    `,
+  },
+  {
+    // Port of Paper Shaders' Swirl (paper-design/shaders, MIT):
+    // twisting color bands radiating from the center with noise fraying.
+    id: 'swirl',
+    name: 'Swirl',
+    kind: 'generate',
+    params: [
+      c('colorBack', 'Background', '#150b22'),
+      c('col1', 'Color 1', '#7c3aed'),
+      c('col2', 'Color 2', '#ff6b62'),
+      c('col3', 'Color 3', '#f5c25b'),
+      c('col4', 'Color 4', '#2dd4bf'),
+      c('col5', 'Color 5', '#150b22'),
+      f('bands', 'Bands', 1, 12, 1, 5),
+      // twist beyond ~0.5 pushes the visible bands off-canvas; the library
+      // default is 0.1
+      f('twist', 'Twist', 0, 1, 0.01, 0.15),
+      f('center', 'Center', 0, 1, 0.01, 0.3),
+      f('proportion', 'Proportion', 0, 1, 0.01, 0.5),
+      f('softness', 'Softness', 0, 1, 0.01, 0.55),
+      f('fray', 'Noise', 0, 1, 0.01, 0.25),
+      f('frayFreq', 'Noise Frequency', 0, 1, 0.01, 0.5),
+      f('scale', 'Scale', 0.05, 4, 0.01, 1),
+      f('speed', 'Speed', -2, 2, 0.01, 0.35),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      // match Paper's object UV (fit: cover): longest axis spans [-0.5, 0.5]
+      vec2 q = (uv - vec2(0.5 * asp2, 0.5)) / max(asp2, 1.0);
+      q /= max(scale, 0.001);
+      float l = max(length(q), 1e-4);
+      float tt = t * speed;
+      float angle = ceil(bands) * atan(q.y, q.x) + tt;
+      float angleNorm = angle / 6.28318530718;
+      float tw = 3.0 * clamp(twist, 0.0, 1.0);
+      float shape = fract(pow(l, -tw) + angleNorm);
+      shape = 1.0 - abs(2.0 * shape - 1.0);
+      shape += fray * snoise2(15.0 * frayFreq * frayFreq * q);
+      float mid = smoothstep(0.2, 0.2 + 0.8 * center, pow(l, tw));
+      shape = mix(0.0, shape, mid);
+      float prop = clamp(proportion, 0.0, 1.0);
+      float expo = mix(0.25, 1.0, prop * 2.0);
+      expo = mix(expo, 10.0, max(0.0, prop * 2.0 - 1.0));
+      shape = pow(max(shape, 0.0), expo);
+      float mixer = shape * 5.0;
+      vec3 cols5[5] = vec3[5](col1, col2, col3, col4, col5);
+      vec3 gradient = col1;
+      float outerShape = 0.0;
+      for (int i = 1; i <= 5; i++) {
+        float m = clamp(mixer - float(i - 1), 0.0, 1.0);
+        float aa = fwidth(m);
+        m = smoothstep(0.5 - 0.5 * softness - aa, 0.5 + 0.5 * softness + aa, m);
+        if (i == 1) outerShape = m;
+        gradient = mix(gradient, cols5[i - 1], m);
+      }
+      float midAA = 0.1 * fwidth(pow(l, -tw));
+      float outerMid = smoothstep(0.2, 0.2 + midAA, pow(l, tw));
+      outerShape = mix(0.0, outerShape, outerMid);
+      col = mix(colorBack, gradient, clamp(outerShape, 0.0, 1.0));
+    `,
+  },
+  {
+    // Port of Paper Shaders' NeuroNoise (paper-design/shaders, MIT):
+    // glowing neural filaments from 15 rotated sine layers.
+    id: 'neuronoise',
+    name: 'Neuro Noise',
+    kind: 'generate',
+    params: [
+      c('colorFront', 'Front', '#ff6f8e'),
+      c('colorMid', 'Middle', '#6f3cff'),
+      c('colorBack', 'Back', '#020207'),
+      f('brightness', 'Brightness', 0, 2, 0.01, 1),
+      f('contrast', 'Contrast', 0, 2, 0.01, 1.15),
+      f('scale', 'Scale', 0.05, 4, 0.01, 1),
+      f('speed', 'Speed', -2, 2, 0.01, 0.35),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      // match Paper's pattern UV at a 1080p reference (height spans 10.8 units)
+      vec2 q = (uv - vec2(0.5 * asp2, 0.5)) * 10.8 / max(scale, 0.001);
+      q *= 0.13;
+      float tt = 0.5 * t * speed;
+      vec2 sineAcc = vec2(0.0);
+      vec2 acc = vec2(0.0);
+      float sc = 8.0;
+      for (int j = 0; j < 15; j++) {
+        q = rot2d(q, 1.0);
+        sineAcc = rot2d(sineAcc, 1.0);
+        vec2 layer = q * sc + float(j) + sineAcc - tt;
+        sineAcc += sin(layer);
+        acc += (0.5 + 0.5 * cos(layer)) / sc;
+        sc *= 1.2;
+      }
+      float n = acc.x + acc.y;
+      n = (1.0 + brightness) * n * n;
+      n = pow(n, 0.7 + 6.0 * contrast);
+      n = min(1.4, n);
+      float blend = smoothstep(0.7, 1.4, n);
+      vec3 front = mix(colorMid, colorFront, blend);
+      float alpha = clamp(n, 0.0, 1.0);
+      col = front * max(n, 0.0) + colorBack * (1.0 - alpha);
+    `,
+  },
+  {
+    // Port of Paper Shaders' Warp (paper-design/shaders, MIT):
+    // noise-distorted, swirled checks/stripes/edge blended over 4 colors.
+    id: 'warpflow',
+    name: 'Warp Flow',
+    kind: 'generate',
+    params: [
+      c('col1', 'Color 1', '#121212'),
+      c('col2', 'Color 2', '#9470ff'),
+      c('col3', 'Color 3', '#ff654a'),
+      c('col4', 'Color 4', '#121212'),
+      f('proportion', 'Proportion', 0, 1, 0.01, 0.45),
+      f('softness', 'Softness', 0, 1, 0.01, 1),
+      f('distortion', 'Distortion', 0, 1, 0.01, 0.32),
+      f('swirlAmt', 'Swirl', 0, 1, 0.01, 0.8),
+      f('swirlIter', 'Swirl Passes', 0, 20, 1, 10),
+      { key: 'shape', label: 'Shape', type: 'select', uniform: true,
+        options: ['Checks', 'Stripes', 'Edge'], def: 'Checks' },
+      f('shapeScale', 'Shape Scale', 0, 1, 0.01, 0.1),
+      f('scale', 'Scale', 0.05, 4, 0.01, 1),
+      f('speed', 'Speed', -2, 2, 0.01, 0.35),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      // Paper's pattern UV at a 1080p reference, halved as in the original
+      vec2 q = (uv - vec2(0.5 * asp2, 0.5)) * 10.8 / max(scale, 0.001);
+      q *= 0.5;
+      float tt = 0.0625 * (t * speed + 118.0);
+      float n1 = vnoise(q + tt);
+      float n2 = vnoise(q * 2.0 - tt);
+      float ang = n1 * 6.28318530718;
+      q.x += 4.0 * distortion * n2 * cos(ang);
+      q.y += 4.0 * distortion * n2 * sin(ang);
+      for (int i = 1; i <= 20; i++) {
+        if (float(i) >= swirlIter) break;
+        float fi = float(i);
+        q.x += swirlAmt / fi * cos(tt + fi * 1.5 * q.y);
+        q.y += swirlAmt / fi * cos(tt + fi * 1.0 * q.x);
+      }
+      float prop = clamp(proportion, 0.0, 1.0);
+      float sv = 0.0;
+      if (shape < 0.5) {
+        vec2 cuv = q * (0.5 + 3.5 * shapeScale);
+        sv = 0.5 + 0.5 * sin(cuv.x) * cos(cuv.y);
+        sv += 0.48 * sign(prop - 0.5) * pow(abs(prop - 0.5), 0.5);
+      } else if (shape < 1.5) {
+        vec2 suv = q * (2.0 * shapeScale);
+        float fy = fract(suv.y);
+        sv = smoothstep(0.0, 0.55, fy) * (1.0 - smoothstep(0.45, 1.0, fy));
+        sv += 0.48 * sign(prop - 0.5) * pow(abs(prop - 0.5), 0.5);
+      } else {
+        float ss = 5.0 * (1.0 - shapeScale);
+        float e0 = 0.45 - ss;
+        float e1 = 0.55 + ss;
+        sv = smoothstep(min(e0, e1), max(e0, e1), 1.0 - q.y + 0.3 * (prop - 0.5));
+      }
+      float mixer = sv * 3.0;
+      vec3 cols4[4] = vec3[4](col1, col2, col3, col4);
+      vec3 gradient = col1;
+      float aa = fwidth(sv);
+      for (int i = 1; i < 4; i++) {
+        float m = clamp(mixer - float(i - 1), 0.0, 1.0);
+        float lms = floor(m);
+        float sft = 0.5 * softness + fwidth(m);
+        float sm = smoothstep(max(0.0, 0.5 - sft - aa), min(1.0, 0.5 + sft + aa), m - lms);
+        m = mix(lms + sm, m, softness);
+        gradient = mix(gradient, cols4[i], m);
+      }
+      col = clamp(gradient, 0.0, 1.0);
     `,
   },
   {

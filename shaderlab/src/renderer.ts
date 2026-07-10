@@ -114,7 +114,9 @@ export class Renderer {
   }
 
   private syncLayerTexture(layer: Layer, unit: number) {
-    if (layer.effectId === 'image') this.syncImageTexture(layer, unit)
+    const fx = EFFECT_MAP.get(layer.effectId)
+    const imageParam = fx?.params.find((param) => param.type === 'image')
+    if (imageParam) this.syncImageTexture(layer, unit, imageParam.key)
     else this.syncTextTexture(layer, unit)
     const l = this.loc(`u_${layer.uid}_tex`)
     if (l) this.gl.uniform1i(l, unit)
@@ -122,9 +124,9 @@ export class Renderer {
     if (la) this.gl.uniform1f(la, this.texCache.get(layer.uid)?.aspect ?? 1)
   }
 
-  private syncImageTexture(layer: Layer, unit: number) {
+  private syncImageTexture(layer: Layer, unit: number, sourceKey = 'src') {
     const gl = this.gl
-    const src = String(layer.values.src ?? '')
+    const src = String(layer.values[sourceKey] ?? '')
     let img = src ? this.imgCache.get(src) : undefined
     if (src && !img) {
       const el = new Image()

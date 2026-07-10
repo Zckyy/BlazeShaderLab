@@ -144,6 +144,28 @@ float warpNoise(vec2 p, float mode) {
 vec2 rot2d(vec2 v, float th) {
   return mat2(cos(th), sin(th), -sin(th), cos(th)) * v;
 }
+// Built-in shape set shared by the Paper Design ports. p is centered in
+// canvas-height units; the uploaded-image option is handled by each effect.
+float paperShape(vec2 p, float shape, float t) {
+  if (shape < 0.5) return 1.0;
+  if (shape < 1.5) return 1.0 - smoothstep(0.46, 0.5, length(p));
+  if (shape < 2.5) {
+    vec2 d = abs(rot2d(p, 0.785398));
+    return 1.0 - smoothstep(0.43, 0.5, max(d.x, d.y));
+  }
+  float field = 0.0;
+  for (int i = 0; i < 5; i++) {
+    float fi = float(i);
+    float sp = 0.45 + 0.2 * sin(fi * 12.345);
+    float an = -fi * 1.5;
+    vec2 d1 = vec2(cos(an), sin(an));
+    vec2 d2 = vec2(-d1.y, d1.x);
+    vec2 tr = 0.22 * (d1 * sin(t * sp + fi * 1.23) + d2 * cos(t * sp * 0.7 + fi * 2.17));
+    float d = length(p + tr);
+    field += pow(1.0 - clamp(d * 1.55, 0.0, 1.0), 4.0);
+  }
+  return smoothstep(0.10, 0.18, field);
+}
 vec3 tonemapReinhard(vec3 x) { return x / (1.0 + x); }
 vec3 uncharted2Curve(vec3 x) {
   float A = 0.15; float B = 0.5; float C = 0.1; float D = 0.2; float E = 0.02; float F = 0.3;
@@ -937,6 +959,247 @@ export const EFFECTS: EffectDef[] = [
         gradient = mix(gradient, cols4[i], m);
       }
       col = clamp(gradient, 0.0, 1.0);
+    `,
+  },
+  {
+    // Adapted from Paper Design's Heatmap shader (MIT). The original consumes
+    // a preprocessed contour texture; this port derives the glow from the raw
+    // upload alpha so it remains a self-contained ShaderLab layer.
+    id: 'paperheatmap',
+    name: 'Heatmap',
+    kind: 'generate',
+    texture: true,
+    params: [
+      { key: 'src', label: 'Shape Image', type: 'image', def: '' },
+      { key: 'shape', label: 'Shape', type: 'select', uniform: true,
+        options: ['Backdrop', 'Circle', 'Diamond', 'Metaballs', 'Uploaded Image'], def: 'Metaballs' },
+      c('colorBack', 'Background', '#000000'),
+      c('col1', 'Cold', '#11206a'),
+      c('col2', 'Blue', '#2f63e7'),
+      c('col3', 'Cyan', '#6bd7ff'),
+      c('col4', 'Warm', '#ffe679'),
+      c('col5', 'Hot', '#ff4c00'),
+      f('contour', 'Contour', 0, 1, 0.01, 0.5),
+      f('angle', 'Angle', 0, 360, 1, 0),
+      f('noise', 'Grain', 0, 1, 0.01, 0),
+      f('innerGlow', 'Inner Glow', 0, 1, 0.01, 0.5),
+      f('outerGlow', 'Outer Glow', 0, 1, 0.01, 0.5),
+      f('scale', 'Scale', 0.1, 2, 0.01, 0.75),
+      f('speed', 'Speed', -3, 3, 0.01, 1),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      vec2 p = (uv - vec2(0.5 * asp2, 0.5)) / max(scale, 0.001);
+      vec2 tuv = p / vec2(max(texAspect, 0.001), 1.0) + 0.5;
+      tuv.y = 1.0 - tuv.y;
+      float inT = step(0.0, tuv.x) * step(tuv.x, 1.0) * step(0.0, tuv.y) * step(tuv.y, 1.0);
+      float mask = paperShape(p, shape, t * speed);
+      float outer = paperShape(p / (1.0 + 0.5 * outerGlow), shape, t * speed);
+      float inner = paperShape(p * (1.0 + 0.7 * innerGlow), shape, t * speed);
+      if (shape > 3.5) {
+        vec2 px = vec2(1.0) / vec2(textureSize(tex, 0));
+        mask = texture(tex, clamp(tuv, 0.0, 1.0)).a * inT;
+        float nearA = 0.0;
+        float farA = 0.0;
+        for (int i = 0; i < 8; i++) {
+          float a = float(i) * 0.785398;
+          vec2 d = vec2(cos(a), sin(a));
+          nearA += texture(tex, clamp(tuv + d * px * (2.0 + innerGlow * 12.0), 0.0, 1.0)).a;
+          farA += texture(tex, clamp(tuv + d * px * (3.0 + outerGlow * 28.0), 0.0, 1.0)).a;
+        }
+        inner = nearA * 0.125 * inT;
+        outer = max(mask, farA * 0.125 * inT);
+      }
+      float edge = clamp((outer - inner) * (0.7 + contour * 2.2), 0.0, 1.0);
+      vec2 rp = rot2d(p, radians(-angle));
+      float wave = 0.5 + 0.5 * sin((rp.y + 0.22 * snoise2(rp * 3.0 - t * speed * 0.2)) * 8.0 - t * speed * 1.8);
+      float intensity = clamp((0.3 + 0.7 * wave) * (inner * innerGlow + edge + (outer - mask) * outerGlow), 0.0, 1.0);
+      intensity = clamp(intensity + contour * edge, 0.0, 1.0);
+      float mixer = intensity * 4.0;
+      vec3 cols5[5] = vec3[5](col1, col2, col3, col4, col5);
+      vec3 heat = col1;
+      for (int i = 1; i < 5; i++) heat = mix(heat, cols5[i], smoothstep(0.0, 1.0, clamp(mixer - float(i - 1), 0.0, 1.0)));
+      float grain = (hash21(gl_FragCoord.xy + floor(t * 37.0)) - 0.5) * noise;
+      col = mix(colorBack, heat, clamp(max(mask * 0.16, intensity) + grain, 0.0, 1.0));
+    `,
+  },
+  {
+    // Adapted from Paper Design's Liquid Metal shader (MIT).
+    id: 'liquidmetal',
+    name: 'Liquid Metal',
+    kind: 'generate',
+    texture: true,
+    params: [
+      { key: 'src', label: 'Shape Image', type: 'image', def: '' },
+      { key: 'shape', label: 'Shape', type: 'select', uniform: true,
+        options: ['Backdrop', 'Circle', 'Diamond', 'Metaballs', 'Uploaded Image'], def: 'Diamond' },
+      c('colorBack', 'Background', '#aaaaac'),
+      c('colorTint', 'Metal Tint', '#ffffff'),
+      f('distortion', 'Distortion', 0, 1, 0.01, 0.07),
+      f('repetition', 'Repetition', 0.5, 10, 0.1, 2),
+      f('shiftRed', 'Red Shift', -1, 1, 0.01, 0.3),
+      f('shiftBlue', 'Blue Shift', -1, 1, 0.01, 0.3),
+      f('contour', 'Contour', 0, 1, 0.01, 0.4),
+      f('softness', 'Softness', 0, 1, 0.01, 0.1),
+      f('angle', 'Angle', 0, 180, 1, 70),
+      f('scale', 'Scale', 0.1, 2, 0.01, 0.6),
+      f('speed', 'Speed', -3, 3, 0.01, 1),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      vec2 p = (uv - vec2(0.5 * asp2, 0.5)) / max(scale, 0.001);
+      vec2 tuv = p / vec2(max(texAspect, 0.001), 1.0) + 0.5;
+      tuv.y = 1.0 - tuv.y;
+      float inT = step(0.0, tuv.x) * step(tuv.x, 1.0) * step(0.0, tuv.y) * step(tuv.y, 1.0);
+      float mask = paperShape(p, shape, t * speed);
+      if (shape > 3.5) mask = texture(tex, clamp(tuv, 0.0, 1.0)).a * inT;
+      float edge = clamp(length(vec2(dFdx(mask), dFdy(mask))) * 12.0, 0.0, 1.0);
+      vec2 ruv = rot2d(p, radians(-angle + 70.0));
+      float tt = 0.3 * (t * speed + 2.8);
+      float diag = ruv.x - ruv.y;
+      float dist = length(p + vec2(0.0, 0.2 * diag));
+      float bump = clamp(1.0 - pow(1.8 * dist, 1.2), 0.0, 1.0) * pow(clamp(tuv.y, 0.0, 1.0), 0.3);
+      float n = snoise2(p * 2.0 - tt);
+      float direction = ruv.x + diag;
+      direction += distortion * n * (0.5 + edge * 2.0);
+      direction -= contour * edge * 1.7;
+      direction *= (0.1 + (1.1 - edge) * bump) * repetition;
+      direction -= tt;
+      float disp = clamp(1.0 - bump, 0.0, 1.0);
+      float blur = 0.015 + softness * 0.18;
+      float sr = fract(direction + disp * shiftRed * 0.22);
+      float sg = fract(direction);
+      float sb = fract(direction - disp * shiftBlue * 0.22);
+      float bandR = smoothstep(0.12 - blur, 0.12 + blur, sr) * (1.0 - smoothstep(0.82 - blur, 0.82 + blur, sr));
+      float bandG = smoothstep(0.12 - blur, 0.12 + blur, sg) * (1.0 - smoothstep(0.82 - blur, 0.82 + blur, sg));
+      float bandB = smoothstep(0.12 - blur, 0.12 + blur, sb) * (1.0 - smoothstep(0.82 - blur, 0.82 + blur, sb));
+      vec3 metal = mix(vec3(0.055), colorTint, vec3(bandR, bandG, bandB));
+      metal += edge * contour * colorTint * 0.35;
+      col = mix(colorBack, clamp(metal, 0.0, 1.0), mask);
+    `,
+  },
+  {
+    // Adapted from Paper Design's Gem Smoke shader (MIT).
+    id: 'gemsmoke',
+    name: 'Gem Smoke',
+    kind: 'generate',
+    texture: true,
+    params: [
+      { key: 'src', label: 'Shape Image', type: 'image', def: '' },
+      { key: 'shape', label: 'Shape', type: 'select', uniform: true,
+        options: ['Backdrop', 'Circle', 'Diamond', 'Metaballs', 'Uploaded Image'], def: 'Diamond' },
+      c('colorBack', 'Background', '#f0efea'),
+      c('colorInner', 'Inner Color', '#fafaf5'),
+      { key: 'colorCount', label: 'Smoke Colors', type: 'select', uniform: true,
+        options: ['2', '3', '4'], def: '2' },
+      c('col1', 'Smoke 1', '#333333'),
+      c('col2', 'Smoke 2', '#e7e6df'),
+      c('col3', 'Smoke 3', '#ffffff'),
+      c('col4', 'Smoke 4', '#ffffff'),
+      f('innerDistortion', 'Inner Distortion', 0, 1, 0.01, 0.8),
+      f('outerDistortion', 'Outer Distortion', 0, 1, 0.01, 0.6),
+      f('outerGlow', 'Outer Glow', 0, 1, 0.01, 0.55),
+      f('innerGlow', 'Inner Glow', 0, 1, 0.01, 1),
+      f('offset', 'Vertical Offset', -1, 1, 0.01, 0),
+      f('angle', 'Angle', 0, 360, 1, 0),
+      f('smokeSize', 'Smoke Size', 0, 1, 0.01, 0.8),
+      f('glassDepth', 'Glass Depth', 0, 1, 0.01, 0.8),
+      f('reflection', 'Reflectivity', 0, 1, 0.01, 0.45),
+      f('scale', 'Scale', 0.1, 2, 0.01, 0.6),
+      f('speed', 'Speed', -3, 3, 0.01, 1),
+    ],
+    glsl: `
+      float asp2 = u_res.x / u_res.y;
+      vec2 p = (uv - vec2(0.5 * asp2, 0.5)) / max(scale, 0.001);
+      vec2 tuv = p / vec2(max(texAspect, 0.001), 1.0) + 0.5;
+      tuv.y = 1.0 - tuv.y;
+      float inT = step(0.0, tuv.x) * step(tuv.x, 1.0) * step(0.0, tuv.y) * step(tuv.y, 1.0);
+      // Paper's built-in shapes use a continuous edge field, not a binary
+      // silhouette. That field acts like the curved depth of a glass object.
+      float edge = 0.0;
+      float mask = 1.0;
+      float roundness = 1.0;
+      if (shape < 0.5) {
+        vec2 box = min(vec2(0.5 * asp2, 0.5) - abs(p * scale), vec2(0.5));
+        edge = 1.0 - smoothstep(0.0, 0.08, min(box.x, box.y));
+      } else if (shape < 1.5) {
+        edge = pow(clamp(2.05 * length(p), 0.0, 1.0), 18.0);
+      } else if (shape < 2.5) {
+        vec2 dp = rot2d(p, 0.785398) * 1.42 + 0.5;
+        vec2 border = min(dp, 1.0 - dp);
+        float mx = pow(smoothstep(0.0, 0.15, border.x), 0.25);
+        float my = pow(smoothstep(0.0, 0.15, border.y), 0.25);
+        edge = clamp(1.0 - mx * my, 0.0, 1.0);
+      } else if (shape < 3.5) {
+        float field = 0.0;
+        for (int i = 0; i < 5; i++) {
+          float fi = float(i);
+          float sp = 1.5 + 0.6667 * sin(fi * 12.345);
+          float an = -fi * 1.5;
+          vec2 d1 = vec2(cos(an), sin(an));
+          vec2 d2 = vec2(cos(an + 1.57), sin(an + 1.0));
+          vec2 tr = 0.4 * (d1 * sin(t * speed * sp + fi * 1.23) + d2 * cos(t * speed * sp * 0.7 + fi * 2.17));
+          field += pow(1.0 - clamp(length(p * 1.3 + tr), 0.0, 1.0), 4.0);
+        }
+        edge = pow(1.0 - smoothstep(0.65, 0.9, field), 4.0);
+      } else {
+        vec2 px = vec2(1.0) / vec2(textureSize(tex, 0));
+        float alpha = texture(tex, clamp(tuv, 0.0, 1.0)).a * inT;
+        float blurred = alpha * 4.0;
+        blurred += texture(tex, clamp(tuv + vec2(px.x, 0.0) * 8.0, 0.0, 1.0)).a;
+        blurred += texture(tex, clamp(tuv - vec2(px.x, 0.0) * 8.0, 0.0, 1.0)).a;
+        blurred += texture(tex, clamp(tuv + vec2(0.0, px.y) * 8.0, 0.0, 1.0)).a;
+        blurred += texture(tex, clamp(tuv - vec2(0.0, px.y) * 8.0, 0.0, 1.0)).a;
+        blurred *= 0.125 * inT;
+        mask = alpha;
+        roundness = blurred;
+        edge = 1.0 - blurred;
+      }
+      if (shape < 3.5) {
+        float aa = max(2.0 * fwidth(edge), 0.001);
+        mask = 1.0 - smoothstep(0.9 - aa, 0.9, edge);
+        roundness = 1.0 - edge;
+      }
+      roundness = mix(mask, roundness, glassDepth);
+      vec2 smoke = rot2d(p, radians(angle)) * mix(4.0, 1.0, smokeSize);
+      vec2 innerUV = smoke;
+      vec2 outerUV = smoke;
+      innerUV.y += innerDistortion * (1.0 - smoothstep(0.0, 1.0, length(0.4 * innerUV))) - 0.4 * innerDistortion + 0.7 * offset * roundness;
+      outerUV.y += outerDistortion * (1.0 - smoothstep(0.0, 1.0, length(0.4 * outerUV))) - 0.4 * outerDistortion;
+      for (int i = 1; i < 5; i++) {
+        float fi = float(i);
+        innerUV.x += innerDistortion * roundness / fi * cos(t * speed + fi * 2.9 * innerUV.y);
+        innerUV.y += innerDistortion * roundness / fi * cos(t * speed + fi * 1.5 * innerUV.x);
+        outerUV.x += outerDistortion / fi * cos(t * speed + fi * 2.9 * outerUV.y);
+        outerUV.y += outerDistortion / fi * cos(t * speed + fi * 1.5 * outerUV.x);
+      }
+      float innerShape = exp(-1.5 * dot(innerUV, innerUV)) * (0.01 + 0.99 * innerGlow) * mask;
+      float outerShape = exp(-1.5 * dot(outerUV, outerUV)) * outerGlow * outerGlow * (1.0 - mask);
+      float smokeMask = clamp(innerShape + outerShape, 0.0, 1.0);
+      float activeColors = colorCount + 2.0;
+      float mixer = smokeMask * activeColors;
+      smokeMask = smoothstep(0.0, 1.0, clamp(mixer, 0.0, 1.0));
+      vec3 smokeCol = col1;
+      smokeCol = mix(smokeCol, col2, smoothstep(0.0, 1.0, clamp(mixer - 1.0, 0.0, 1.0)));
+      if (activeColors > 2.5) smokeCol = mix(smokeCol, col3, smoothstep(0.0, 1.0, clamp(mixer - 2.0, 0.0, 1.0)));
+      if (activeColors > 3.5) smokeCol = mix(smokeCol, col4, smoothstep(0.0, 1.0, clamp(mixer - 3.0, 0.0, 1.0)));
+      vec3 base = mix(colorBack, colorInner, mask);
+      vec3 glassCol = mix(base, smokeCol, smokeMask);
+
+      // A shallow normal reconstructed from the depth field adds the narrow
+      // directional highlight and dark opposite rim seen on polished glass.
+      vec2 depthGrad = vec2(dFdx(roundness), dFdy(roundness));
+      vec3 glassNormal = normalize(vec3(-depthGrad * 42.0 * glassDepth, 1.0));
+      vec3 lightDir = normalize(vec3(-0.45, 0.7, 0.8));
+      float specular = pow(max(dot(glassNormal, lightDir), 0.0), 18.0);
+      float fresnel = pow(1.0 - clamp(glassNormal.z, 0.0, 1.0), 2.0);
+      float rim = mask * smoothstep(0.18, 0.88, edge);
+      float facing = dot(glassNormal.xy, normalize(vec2(-0.45, 0.7)));
+      glassCol += reflection * mask * specular * vec3(0.7);
+      glassCol += reflection * rim * max(facing, 0.0) * vec3(0.28);
+      glassCol -= reflection * rim * max(-facing, 0.0) * vec3(0.16);
+      glassCol += reflection * fresnel * mask * vec3(0.12);
+      col = clamp(glassCol, 0.0, 1.0);
     `,
   },
   {
